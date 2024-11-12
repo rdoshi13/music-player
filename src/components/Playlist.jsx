@@ -14,6 +14,14 @@ const Playlist = () => {
     }
   };
 
+  const handleFileUpload = (event) => {
+    const files = event.target.files;
+    Array.from(files).forEach((file) => {
+      const fileURL = URL.createObjectURL(file);
+      addToPlaylist({ title: file.name, url: fileURL });
+    });
+  };
+
   return (
     <div>
       <h3>Playlist</h3>
@@ -26,6 +34,7 @@ const Playlist = () => {
           </li>
         ))}
       </ul>
+
       <input
         type="text"
         placeholder="Track Title"
@@ -39,6 +48,16 @@ const Playlist = () => {
         onChange={(e) => setTrackURL(e.target.value)}
       />
       <button onClick={handleAddTrack}>Add to Playlist</button>
+
+      <div>
+        <input
+          type="file"
+          accept="audio/*"
+          multiple
+          onChange={handleFileUpload}
+        />
+        <p>Select audio files to add them to the playlist.</p>
+      </div>
     </div>
   );
 };
