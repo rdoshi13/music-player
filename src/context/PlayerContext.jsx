@@ -1,4 +1,4 @@
-import React, { createContext, useState, useRef } from 'react';
+import React, { createContext, useState, useRef, useEffect } from 'react';
 
 export const PlayerContext = createContext();
 
@@ -8,6 +8,23 @@ export const PlayerProvider = ({ children }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef(new Audio());
 
+  // Load playlist from localStorage on initial render
+  useEffect(() => {
+    const savedPlaylist = JSON.parse(localStorage.getItem('playlist'));
+    if (savedPlaylist) {
+      setPlaylist(savedPlaylist);
+    }
+  }, []);
+
+  // Save playlist metadata (without URLs) to localStorage whenever it changes
+  useEffect(() => {
+    const playlistMetadata = playlist.map((track) => ({
+      title: track.title,
+      fileName: track.fileName,
+    }));
+    localStorage.setItem('playlist', JSON.stringify(playlistMetadata));
+  }, [playlist]);
+
   const playTrack = (index) => {
     setCurrentTrackIndex(index);
     audioRef.current.src = playlist[index].url;
@@ -16,11 +33,13 @@ export const PlayerProvider = ({ children }) => {
   };
 
   const addToPlaylist = (track) => {
-    setPlaylist([...playlist, track]);
+    const updatedPlaylist = [...playlist, track];
+    setPlaylist(updatedPlaylist);
   };
 
   const removeFromPlaylist = (index) => {
-    setPlaylist(playlist.filter((_, i) => i !== index));
+    const updatedPlaylist = playlist.filter((_, i) => i !== index);
+    setPlaylist(updatedPlaylist);
   };
 
   const contextValue = {
