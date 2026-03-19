@@ -4,6 +4,8 @@ Current behavior:
 
 - Local tracks can display embedded artwork thumbnails from file metadata.
 - If artwork is missing, the UI shows a music-note fallback icon.
+- `Recent Songs` is a dynamic playlist that auto-updates from playback history
+  (last 25 unique tracks).
 
 To do:
 

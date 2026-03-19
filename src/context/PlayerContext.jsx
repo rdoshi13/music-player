@@ -10,7 +10,9 @@ import {
 } from "../utils/localTrackStore";
 import { extractEmbeddedArtworkDataUrl } from "../utils/trackArtwork";
 
-const DEFAULT_PLAYLIST = "recent";
+const ALL_TRACKS_PLAYLIST = "recent";
+const RECENT_SONGS_PLAYLIST = "__recent_songs__";
+const RECENT_SONGS_LIMIT = 25;
 const MUSIC_FOLDER_HANDLE_ID = "primary-music-folder";
 const HANDLE_STORAGE_TIMEOUT_MS = 3500;
 const PLAYLISTS_STORAGE_MAX_CHARS = 2_500_000;
@@ -114,7 +116,7 @@ const serializeTrack = (track) => {
 
 const normalizeStoredPlaylists = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { [DEFAULT_PLAYLIST]: [] };
+    return { [ALL_TRACKS_PLAYLIST]: [], [RECENT_SONGS_PLAYLIST]: [] };
   }
 
   const normalizedPlaylists = {};
@@ -152,8 +154,12 @@ const normalizeStoredPlaylists = (value) => {
       .filter(Boolean);
   });
 
-  if (!normalizedPlaylists[DEFAULT_PLAYLIST]) {
-    normalizedPlaylists[DEFAULT_PLAYLIST] = [];
+  if (!normalizedPlaylists[ALL_TRACKS_PLAYLIST]) {
+    normalizedPlaylists[ALL_TRACKS_PLAYLIST] = [];
+  }
+
+  if (!normalizedPlaylists[RECENT_SONGS_PLAYLIST]) {
+    normalizedPlaylists[RECENT_SONGS_PLAYLIST] = [];
   }
 
   return normalizedPlaylists;
@@ -174,9 +180,12 @@ const withTimeout = async (
 const TRACK_ARTWORK_TIMEOUT_MS = 220;
 
 export const PlayerProvider = ({ children }) => {
-  const [playlists, setPlaylists] = useState({ [DEFAULT_PLAYLIST]: [] });
-  const [currentPlaylist, setCurrentPlaylistState] = useState(DEFAULT_PLAYLIST);
-  const [playbackPlaylist, setPlaybackPlaylist] = useState(DEFAULT_PLAYLIST);
+  const [playlists, setPlaylists] = useState({
+    [ALL_TRACKS_PLAYLIST]: [],
+    [RECENT_SONGS_PLAYLIST]: [],
+  });
+  const [currentPlaylist, setCurrentPlaylistState] = useState(ALL_TRACKS_PLAYLIST);
+  const [playbackPlaylist, setPlaybackPlaylist] = useState(ALL_TRACKS_PLAYLIST);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [nowPlayingTrack, setNowPlayingTrack] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -196,6 +205,80 @@ export const PlayerProvider = ({ children }) => {
   const createTrackId = () =>
     globalThis.crypto?.randomUUID?.() ??
     `track-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const getTrackIdentity = (track) => {
+    if (!track || typeof track !== "object") {
+      return "";
+    }
+
+    if (track.sourceType === LOCAL_HANDLE_TRACK_TYPE && track.localHandleId) {
+      return `local-handle:${track.localHandleId}`;
+    }
+
+    if (track.sourceType === LOCAL_FOLDER_TRACK_TYPE && track.relativePath) {
+      return `local-folder:${track.folderHandleId || MUSIC_FOLDER_HANDLE_ID}:${track.relativePath}`;
+    }
+
+    if (track.sourceType === TEMP_LOCAL_TRACK_TYPE && track.url) {
+      return `temporary-local:${track.url}`;
+    }
+
+    if (track.url) {
+      return `remote:${track.url}`;
+    }
+
+    return `track:${track.title || ""}:${track.fileName || ""}`;
+  };
+
+  const cloneTrackForRecentSongs = (track) => {
+    const serializedTrack = serializeTrack(track);
+    if (serializedTrack) {
+      if (track.trackThumbnail) {
+        serializedTrack.trackThumbnail = track.trackThumbnail;
+      }
+      return serializedTrack;
+    }
+
+    if (isTemporaryLocalTrack(track)) {
+      return {
+        sourceType: TEMP_LOCAL_TRACK_TYPE,
+        title: track.title,
+        url: track.url,
+        fileName: track.fileName,
+        trackThumbnail: track.trackThumbnail,
+      };
+    }
+
+    return null;
+  };
+
+  const updateRecentSongs = (track) => {
+    const recentTrack = cloneTrackForRecentSongs(track);
+    if (!recentTrack) {
+      return;
+    }
+
+    const recentIdentity = getTrackIdentity(recentTrack);
+    if (!recentIdentity) {
+      return;
+    }
+
+    setPlaylists((previousPlaylists) => {
+      const existingRecentSongs = previousPlaylists[RECENT_SONGS_PLAYLIST] || [];
+      const deduplicatedRecentSongs = existingRecentSongs.filter(
+        (item) => getTrackIdentity(item) !== recentIdentity
+      );
+      const nextRecentSongs = [recentTrack, ...deduplicatedRecentSongs].slice(
+        0,
+        RECENT_SONGS_LIMIT
+      );
+
+      return {
+        ...previousPlaylists,
+        [RECENT_SONGS_PLAYLIST]: nextRecentSongs,
+      };
+    });
+  };
 
   const getTrackCacheKey = (track) => {
     if (isLocalHandleTrack(track)) {
@@ -467,7 +550,7 @@ export const PlayerProvider = ({ children }) => {
         const nextSourceFolderName =
           track.sourceFolderName || importedTrack.sourceFolderName || "";
         const nextTrackThumbnail =
-          track.trackThumbnail || importedTrack.trackThumbnail || "";
+          importedTrack.trackThumbnail || track.trackThumbnail || "";
 
         if (
           nextSourceFolderName === (track.sourceFolderName || "") &&
@@ -509,7 +592,10 @@ export const PlayerProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    let hydratedPlaylists = { [DEFAULT_PLAYLIST]: [] };
+    let hydratedPlaylists = {
+      [ALL_TRACKS_PLAYLIST]: [],
+      [RECENT_SONGS_PLAYLIST]: [],
+    };
     const storedPlaylists = localStorage.getItem(PLAYLISTS_STORAGE_KEY);
     if (storedPlaylists) {
       if (storedPlaylists.length > PLAYLISTS_STORAGE_MAX_CHARS) {
@@ -519,7 +605,10 @@ export const PlayerProvider = ({ children }) => {
           const parsedPlaylists = JSON.parse(storedPlaylists);
           hydratedPlaylists = normalizeStoredPlaylists(parsedPlaylists);
         } catch {
-          hydratedPlaylists = { [DEFAULT_PLAYLIST]: [] };
+          hydratedPlaylists = {
+            [ALL_TRACKS_PLAYLIST]: [],
+            [RECENT_SONGS_PLAYLIST]: [],
+          };
           localStorage.removeItem(PLAYLISTS_STORAGE_KEY);
         }
       }
@@ -535,7 +624,7 @@ export const PlayerProvider = ({ children }) => {
     ) {
       setCurrentPlaylistState(storedCurrentPlaylist);
     } else {
-      setCurrentPlaylistState(DEFAULT_PLAYLIST);
+      setCurrentPlaylistState(ALL_TRACKS_PLAYLIST);
     }
 
     const storedVolume = localStorage.getItem(VOLUME_STORAGE_KEY);
@@ -582,8 +671,11 @@ export const PlayerProvider = ({ children }) => {
       ])
     );
 
-    if (!persistablePlaylists[DEFAULT_PLAYLIST]) {
-      persistablePlaylists[DEFAULT_PLAYLIST] = [];
+    if (!persistablePlaylists[ALL_TRACKS_PLAYLIST]) {
+      persistablePlaylists[ALL_TRACKS_PLAYLIST] = [];
+    }
+    if (!persistablePlaylists[RECENT_SONGS_PLAYLIST]) {
+      persistablePlaylists[RECENT_SONGS_PLAYLIST] = [];
     }
 
     try {
@@ -637,7 +729,7 @@ export const PlayerProvider = ({ children }) => {
     }
 
     if (!playlists[currentPlaylist]) {
-      setCurrentPlaylistState(DEFAULT_PLAYLIST);
+      setCurrentPlaylistState(ALL_TRACKS_PLAYLIST);
       return;
     }
 
@@ -767,7 +859,10 @@ export const PlayerProvider = ({ children }) => {
 
     if (!started) {
       setIsPlaying(false);
+      return;
     }
+
+    updateRecentSongs(nextTrack);
   };
 
   playTrackRef.current = playTrack;
@@ -1071,7 +1166,11 @@ export const PlayerProvider = ({ children }) => {
 
   const createPlaylist = (playlistName) => {
     const trimmedPlaylistName = playlistName.trim();
-    if (!trimmedPlaylistName) {
+    if (
+      !trimmedPlaylistName ||
+      trimmedPlaylistName === ALL_TRACKS_PLAYLIST ||
+      trimmedPlaylistName === RECENT_SONGS_PLAYLIST
+    ) {
       return;
     }
 
@@ -1087,7 +1186,11 @@ export const PlayerProvider = ({ children }) => {
 
   const ensurePlaylist = (playlistName) => {
     const trimmedPlaylistName = playlistName.trim();
-    if (!trimmedPlaylistName) {
+    if (
+      !trimmedPlaylistName ||
+      trimmedPlaylistName === ALL_TRACKS_PLAYLIST ||
+      trimmedPlaylistName === RECENT_SONGS_PLAYLIST
+    ) {
       return "";
     }
 
@@ -1138,7 +1241,8 @@ export const PlayerProvider = ({ children }) => {
       !trimmedOldName ||
       !trimmedNewName ||
       trimmedOldName === trimmedNewName ||
-      trimmedOldName === DEFAULT_PLAYLIST ||
+      trimmedOldName === ALL_TRACKS_PLAYLIST ||
+      trimmedOldName === RECENT_SONGS_PLAYLIST ||
       !playlists[trimmedOldName] ||
       playlists[trimmedNewName]
     ) {
@@ -1166,7 +1270,8 @@ export const PlayerProvider = ({ children }) => {
   const deletePlaylist = (playlistName) => {
     const trimmedPlaylistName = playlistName.trim();
     if (
-      trimmedPlaylistName === DEFAULT_PLAYLIST ||
+      trimmedPlaylistName === ALL_TRACKS_PLAYLIST ||
+      trimmedPlaylistName === RECENT_SONGS_PLAYLIST ||
       !playlists[trimmedPlaylistName]
     ) {
       return false;
@@ -1176,8 +1281,11 @@ export const PlayerProvider = ({ children }) => {
     const removedTracks = updatedPlaylists[trimmedPlaylistName] || [];
     delete updatedPlaylists[trimmedPlaylistName];
 
-    if (!updatedPlaylists[DEFAULT_PLAYLIST]) {
-      updatedPlaylists[DEFAULT_PLAYLIST] = [];
+    if (!updatedPlaylists[ALL_TRACKS_PLAYLIST]) {
+      updatedPlaylists[ALL_TRACKS_PLAYLIST] = [];
+    }
+    if (!updatedPlaylists[RECENT_SONGS_PLAYLIST]) {
+      updatedPlaylists[RECENT_SONGS_PLAYLIST] = [];
     }
 
     setPlaylists(updatedPlaylists);
@@ -1200,12 +1308,12 @@ export const PlayerProvider = ({ children }) => {
     });
 
     if (currentPlaylist === trimmedPlaylistName) {
-      setCurrentPlaylistState(DEFAULT_PLAYLIST);
+      setCurrentPlaylistState(ALL_TRACKS_PLAYLIST);
     }
     if (playbackPlaylist === trimmedPlaylistName) {
       stopPlayback();
       setCurrentTrackIndex(0);
-      setPlaybackPlaylist(DEFAULT_PLAYLIST);
+      setPlaybackPlaylist(ALL_TRACKS_PLAYLIST);
       setNowPlayingTrack(null);
     }
 
@@ -1238,6 +1346,8 @@ export const PlayerProvider = ({ children }) => {
     addTrackToPlaylist,
     renamePlaylist,
     deletePlaylist,
+    allTracksPlaylistName: ALL_TRACKS_PLAYLIST,
+    recentSongsPlaylistName: RECENT_SONGS_PLAYLIST,
   };
 
   return (

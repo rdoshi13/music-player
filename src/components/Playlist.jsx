@@ -1,7 +1,6 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { PlayerContext } from "../context/AppPlayerContext";
 
-const ALL_TRACKS_PLAYLIST = "recent";
 const VIEW_ALL_TRACKS = "all-tracks";
 const VIEW_PLAYLISTS = "playlists";
 const PLAYLIST_THUMBNAILS_STORAGE_KEY = "playlistThumbnails";
@@ -17,6 +16,12 @@ const MusicNoteIcon = () => (
 const PlayIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
     <path d="M8 5.1v13.8c0 .78.85 1.26 1.52.86l10.74-6.9a1 1 0 0 0 0-1.68L9.52 4.24A1 1 0 0 0 8 5.1Z" />
+  </svg>
+);
+
+const PauseIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M7 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm7 0h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" />
   </svg>
 );
 
@@ -83,6 +88,8 @@ const Playlist = () => {
     playbackPlaylist,
     currentTrackIndex,
     nowPlayingTrack,
+    isPlaying,
+    audioRef,
     setCurrentPlaylist,
     playTrack,
     addTemporaryLocalFile,
@@ -94,6 +101,8 @@ const Playlist = () => {
     removeFromPlaylist,
     renamePlaylist,
     deletePlaylist,
+    allTracksPlaylistName,
+    recentSongsPlaylistName,
   } = useContext(PlayerContext);
 
   const [isSyncingMusicFolder, setIsSyncingMusicFolder] = useState(false);
@@ -107,29 +116,110 @@ const Playlist = () => {
   const [editingPlaylistThumbnail, setEditingPlaylistThumbnail] = useState("");
   const [editModalStatus, setEditModalStatus] = useState("");
   const thumbnailInputRef = useRef(null);
+  const trackRowRefs = useRef({});
+  const [pendingJumpTarget, setPendingJumpTarget] = useState(null);
 
   const playlistNames = Object.keys(playlists);
   const customPlaylistNames = playlistNames.filter(
-    (playlistName) => playlistName !== ALL_TRACKS_PLAYLIST
+    (playlistName) => playlistName !== allTracksPlaylistName
   );
+  const orderedCustomPlaylistNames = [...customPlaylistNames].sort((left, right) => {
+    if (left === recentSongsPlaylistName) {
+      return -1;
+    }
+    if (right === recentSongsPlaylistName) {
+      return 1;
+    }
+    return left.localeCompare(right);
+  });
   const hasCustomPlaylists = customPlaylistNames.length > 0;
 
   const selectedPlaylistName =
     activeView === VIEW_ALL_TRACKS
-      ? ALL_TRACKS_PLAYLIST
+      ? allTracksPlaylistName
       : customPlaylistNames.includes(selectedPlaylistFromList)
         ? selectedPlaylistFromList
         : "";
 
   const tracks = playlists[selectedPlaylistName] || [];
+  const getPlaylistDisplayName = (playlistName) =>
+    playlistName === recentSongsPlaylistName ? "Recent Songs" : playlistName;
+  const getPlaylistDisplayThumbnail = (playlistName) => {
+    if (playlistName === recentSongsPlaylistName) {
+      const recentTracks = playlists[recentSongsPlaylistName] || [];
+      const firstTrackWithThumbnail = recentTracks.find(
+        (track) => typeof track?.trackThumbnail === "string" && track.trackThumbnail
+      );
+      return firstTrackWithThumbnail?.trackThumbnail || "";
+    }
+    return playlistThumbnails[playlistName] || "";
+  };
   const viewTitle =
     activeView === VIEW_ALL_TRACKS
       ? "All Tracks"
       : selectedPlaylistName
-        ? selectedPlaylistName
+        ? getPlaylistDisplayName(selectedPlaylistName)
       : hasCustomPlaylists
         ? "Playlists"
         : "No Playlists";
+
+  useEffect(() => {
+    const handleJumpToCurrentTrack = (event) => {
+      const playlistName = event?.detail?.playlistName;
+      const trackIndex = Number(event?.detail?.trackIndex);
+      if (
+        typeof playlistName !== "string" ||
+        !Number.isInteger(trackIndex) ||
+        trackIndex < 0
+      ) {
+        return;
+      }
+
+      if (!playlists[playlistName]) {
+        return;
+      }
+
+      if (playlistName === allTracksPlaylistName) {
+        setActiveView(VIEW_ALL_TRACKS);
+      } else {
+        setActiveView(VIEW_PLAYLISTS);
+        setSelectedPlaylistFromList(playlistName);
+      }
+      setCurrentPlaylist(playlistName);
+      setPendingJumpTarget({
+        playlistName,
+        trackIndex,
+        stamp: Date.now(),
+      });
+    };
+
+    window.addEventListener("player:jump-to-current-track", handleJumpToCurrentTrack);
+    return () => {
+      window.removeEventListener(
+        "player:jump-to-current-track",
+        handleJumpToCurrentTrack
+      );
+    };
+  }, [allTracksPlaylistName, playlists, setCurrentPlaylist]);
+
+  useEffect(() => {
+    if (!pendingJumpTarget) {
+      return;
+    }
+
+    if (selectedPlaylistName !== pendingJumpTarget.playlistName) {
+      return;
+    }
+
+    const rowKey = `${pendingJumpTarget.playlistName}::${pendingJumpTarget.trackIndex}`;
+    const targetRow = trackRowRefs.current[rowKey];
+    if (!targetRow) {
+      return;
+    }
+
+    targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+    setPendingJumpTarget(null);
+  }, [pendingJumpTarget, selectedPlaylistName, tracks.length]);
 
   useEffect(() => {
     const storedThumbnails = localStorage.getItem(PLAYLIST_THUMBNAILS_STORAGE_KEY);
@@ -187,7 +277,7 @@ const Playlist = () => {
   const handleFileUpload = (event) => {
     const files = event.target.files;
     Array.from(files).forEach((file) => {
-      addTemporaryLocalFile(file, ALL_TRACKS_PLAYLIST);
+      addTemporaryLocalFile(file, allTracksPlaylistName);
     });
     event.target.value = "";
   };
@@ -196,7 +286,7 @@ const Playlist = () => {
     setIsSyncingMusicFolder(true);
     setLocalImportStatus("");
     try {
-      const result = await connectMusicFolder(ALL_TRACKS_PLAYLIST);
+      const result = await connectMusicFolder(allTracksPlaylistName);
       setLocalImportStatus(result?.message || "Could not connect the folder.");
     } catch {
       setLocalImportStatus("Could not connect the folder. Please try again.");
@@ -209,7 +299,7 @@ const Playlist = () => {
     setIsSyncingMusicFolder(true);
     setLocalImportStatus("");
     try {
-      const result = await syncMusicFolder(ALL_TRACKS_PLAYLIST);
+      const result = await syncMusicFolder(allTracksPlaylistName);
       setLocalImportStatus(result?.message || "Could not sync folder tracks.");
     } catch {
       setLocalImportStatus("Could not sync folder tracks. Please reconnect and try again.");
@@ -219,7 +309,7 @@ const Playlist = () => {
   };
 
   const handleRemoveAllSyncedTracks = () => {
-    const removedCount = removeAllSyncedTracks(ALL_TRACKS_PLAYLIST);
+    const removedCount = removeAllSyncedTracks(allTracksPlaylistName);
     if (removedCount > 0) {
       setLocalImportStatus(`Removed ${removedCount} synced folder track(s).`);
       return;
@@ -379,9 +469,12 @@ const Playlist = () => {
         <div className="playlist-browser" aria-label="Available playlists">
           {hasCustomPlaylists ? (
             <ul className="playlist-list">
-              {customPlaylistNames.map((name) => {
+              {orderedCustomPlaylistNames.map((name) => {
                 const playlistTrackCount = (playlists[name] || []).length;
                 const canPlayPlaylist = playlistTrackCount > 0;
+                const isSystemRecentSongs = name === recentSongsPlaylistName;
+                const playlistDisplayName = getPlaylistDisplayName(name);
+                const playlistDisplayThumbnail = getPlaylistDisplayThumbnail(name);
 
                 return (
                   <li key={name} className="playlist-list-row">
@@ -401,14 +494,14 @@ const Playlist = () => {
                       disabled={!canPlayPlaylist}
                       aria-label={
                         canPlayPlaylist
-                          ? `Play playlist ${name}`
-                          : `Playlist ${name} has no tracks`
+                          ? `Play playlist ${playlistDisplayName}`
+                          : `Playlist ${playlistDisplayName} has no tracks`
                       }
                     >
-                      {playlistThumbnails[name] ? (
+                      {playlistDisplayThumbnail ? (
                         <img
-                          src={playlistThumbnails[name]}
-                          alt={`${name} thumbnail`}
+                          src={playlistDisplayThumbnail}
+                          alt={`${playlistDisplayName} thumbnail`}
                           className="playlist-cover-image"
                         />
                       ) : (
@@ -428,26 +521,28 @@ const Playlist = () => {
                         setCurrentPlaylist(name);
                       }}
                     >
-                      {name}
+                      {playlistDisplayName}
                     </button>
-                    <div className="playlist-row-actions">
-                      <button
-                        type="button"
-                        className="playlist-action-btn"
-                        onClick={() => openEditModal(name)}
-                        aria-label={`Edit playlist ${name}`}
-                      >
-                        <EditIcon />
-                      </button>
-                      <button
-                        type="button"
-                        className="playlist-action-btn playlist-action-btn-danger"
-                        onClick={() => handleDeletePlaylist(name)}
-                        aria-label={`Delete playlist ${name}`}
-                      >
-                        <DeleteIcon />
-                      </button>
-                    </div>
+                    {!isSystemRecentSongs && (
+                      <div className="playlist-row-actions">
+                        <button
+                          type="button"
+                          className="playlist-action-btn"
+                          onClick={() => openEditModal(name)}
+                          aria-label={`Edit playlist ${playlistDisplayName}`}
+                        >
+                          <EditIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="playlist-action-btn playlist-action-btn-danger"
+                          onClick={() => handleDeletePlaylist(name)}
+                          aria-label={`Delete playlist ${playlistDisplayName}`}
+                        >
+                          <DeleteIcon />
+                        </button>
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -540,14 +635,49 @@ const Playlist = () => {
             Boolean(nowPlayingTrack) &&
             selectedPlaylistName === playbackPlaylist &&
             index === currentTrackIndex;
+          const rowKey = `${selectedPlaylistName}::${index}`;
+          const overlayIsPause = isActive && isPlaying;
+          const handleTrackThumbnailClick = () => {
+            if (!isActive) {
+              void playTrack(index, selectedPlaylistName);
+              return;
+            }
+
+            if (!audioRef.current?.src) {
+              void playTrack(index, selectedPlaylistName);
+              return;
+            }
+
+            if (isPlaying) {
+              audioRef.current.pause();
+              return;
+            }
+
+            const playPromise = audioRef.current.play();
+            if (playPromise?.catch) {
+              playPromise.catch(() => undefined);
+            }
+          };
 
           return (
             <li
               className={`track-item ${isActive ? "track-item-active" : ""}`}
               key={`${track.title}-${index}`}
+              ref={(node) => {
+                if (node) {
+                  trackRowRefs.current[rowKey] = node;
+                } else {
+                  delete trackRowRefs.current[rowKey];
+                }
+              }}
             >
               <div className="track-main">
-                <div className="track-thumb" aria-hidden="true">
+                <button
+                  type="button"
+                  className="track-thumb-btn"
+                  onClick={handleTrackThumbnailClick}
+                  aria-label={`${overlayIsPause ? "Pause" : "Play"} ${track.title}`}
+                >
                   {track.trackThumbnail ? (
                     <img
                       src={track.trackThumbnail}
@@ -555,16 +685,19 @@ const Playlist = () => {
                       className="track-thumb-image"
                     />
                   ) : (
-                    <span className="track-thumb-icon">
+                    <span className="track-thumb-icon track-thumb-icon-music">
                       <MusicNoteIcon />
                     </span>
                   )}
-                </div>
+                  <span className="track-thumb-icon track-thumb-icon-play">
+                    {overlayIsPause ? <PauseIcon /> : <PlayIcon />}
+                  </span>
+                </button>
                 <div className="track-text">
                   <p className="track-name">{track.title}</p>
                   <p className="track-meta">
                     {track.sourceType === "local-folder"
-                      ? selectedPlaylistName === ALL_TRACKS_PLAYLIST
+                      ? selectedPlaylistName === allTracksPlaylistName
                         ? track.sourceFolderName || "Unknown folder"
                         : "Folder track (persistent)"
                       : track.sourceType === "local-handle"
@@ -576,12 +709,6 @@ const Playlist = () => {
                 </div>
               </div>
               <div className="track-actions">
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => playTrack(index, selectedPlaylistName)}
-                >
-                  Play
-                </button>
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => removeFromPlaylist(index, selectedPlaylistName)}

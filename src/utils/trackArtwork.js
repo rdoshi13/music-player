@@ -247,9 +247,12 @@ const parseCovrAtom = (bytes, view, start, end) => {
     const payloadStart = cursor + headerSize;
     const payloadEnd = cursor + size;
 
-    if (type === "data" && payloadEnd >= payloadStart + 12) {
-      const dataType = view.getUint32(payloadStart + 4, false);
-      const imageBytes = bytes.slice(payloadStart + 12, payloadEnd);
+    // iTunes metadata "data" atom payload:
+    // 4 bytes version+flags (flags low 24 bits encode type), 4 bytes locale, then data.
+    if (type === "data" && payloadEnd >= payloadStart + 8) {
+      const versionAndFlags = view.getUint32(payloadStart, false);
+      const dataType = versionAndFlags & 0x00ffffff;
+      const imageBytes = bytes.slice(payloadStart + 8, payloadEnd);
       if (imageBytes.length > 0) {
         const mimeType =
           dataType === 14
@@ -267,6 +270,19 @@ const parseCovrAtom = (bytes, view, start, end) => {
 
   return null;
 };
+
+const isRenderableImageDataUrl = (value) =>
+  new Promise((resolve) => {
+    if (typeof value !== "string" || !value.startsWith("data:image/")) {
+      resolve(false);
+      return;
+    }
+
+    const image = new Image();
+    image.onload = () => resolve(true);
+    image.onerror = () => resolve(false);
+    image.src = value;
+  });
 
 const MP4_CONTAINER_TYPES = new Set([
   "moov",
@@ -470,7 +486,12 @@ export const extractEmbeddedArtworkDataUrl = async (file) => {
         ? artwork.mimeType
         : detectImageMimeType(artwork.imageBytes) || IMAGE_TYPE_JPEG;
 
-    return await optimizeThumbnailDataUrl(artwork.imageBytes, mimeType);
+    const optimizedDataUrl = await optimizeThumbnailDataUrl(
+      artwork.imageBytes,
+      mimeType
+    );
+    const isRenderable = await isRenderableImageDataUrl(optimizedDataUrl);
+    return isRenderable ? optimizedDataUrl : "";
   } catch {
     return "";
   }

@@ -420,7 +420,7 @@
   gap: 0.62rem;
 }
 
-.track-thumb {
+.track-thumb-btn {
   width: 2.6rem;
   height: 2.6rem;
   border-radius: 9px;
@@ -431,6 +431,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  color: var(--ink-700);
+  cursor: pointer;
+  padding: 0;
 }
 
 .track-thumb-image {
@@ -438,19 +442,44 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: opacity 140ms ease;
 }
 
 .track-thumb-icon {
+  position: absolute;
   color: var(--ink-700);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: opacity 140ms ease, transform 140ms ease;
 }
 
 .track-thumb-icon svg {
   width: 1.1rem;
   height: 1.1rem;
   fill: currentColor;
+}
+
+.track-thumb-icon-play {
+  opacity: 0;
+  transform: scale(0.85);
+}
+
+.track-thumb-btn:hover .track-thumb-icon-music,
+.track-thumb-btn:focus-visible .track-thumb-icon-music {
+  opacity: 0;
+  transform: scale(0.85);
+}
+
+.track-thumb-btn:hover .track-thumb-icon-play,
+.track-thumb-btn:focus-visible .track-thumb-icon-play {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.track-thumb-btn:hover .track-thumb-image,
+.track-thumb-btn:focus-visible .track-thumb-image {
+  opacity: 0.25;
 }
 
 .track-name {
@@ -599,6 +628,63 @@
 
 .track-summary {
   min-width: 0;
+}
+
+.track-summary-main {
+  display: flex;
+  align-items: center;
+  gap: 0.58rem;
+  min-width: 0;
+}
+
+.player-track-thumb {
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-track-thumb-btn {
+  padding: 0;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.player-track-thumb-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #a8bab7;
+  background: #f8fbfb;
+}
+
+.player-track-thumb-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.player-track-thumb-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.player-track-thumb-icon {
+  color: var(--ink-700);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-track-thumb-icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: currentColor;
 }
 
 .track-summary-title {
@@ -878,6 +964,17 @@
   .track-summary-title {
     font-size: 1rem;
     max-width: 40vw;
+  }
+
+  .player-track-thumb {
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: 9px;
+  }
+
+  .player-track-thumb-icon svg {
+    width: 1.05rem;
+    height: 1.05rem;
   }
 
   .icon-btn {

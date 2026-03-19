@@ -54,6 +54,12 @@ const AddToPlaylistIcon = () => (
   </svg>
 );
 
+const MusicNoteIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M14.5 3a1 1 0 0 0-1 1v9.06A3.48 3.48 0 0 0 12 12.7c-1.93 0-3.5 1.41-3.5 3.15S10.07 19 12 19s3.5-1.41 3.5-3.15V8.5h4V12a3.48 3.48 0 0 0-1.5-.3c-1.93 0-3.5 1.41-3.5 3.15S16.07 18 18 18s3.5-1.41 3.5-3.15V4a1 1 0 0 0-1-1h-6Z" />
+  </svg>
+);
+
 const Player = () => {
   const {
     playlists,
@@ -67,6 +73,8 @@ const Player = () => {
     addTrackToPlaylist,
     audioRef,
     playTrack,
+    allTracksPlaylistName,
+    recentSongsPlaylistName,
   } = useContext(PlayerContext);
 
   const [currentTime, setCurrentTime] = useState(0);
@@ -78,13 +86,24 @@ const Player = () => {
   const [customSleepMinutes, setCustomSleepMinutes] = useState("45");
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [playlistActionStatus, setPlaylistActionStatus] = useState("");
+  const [hasBrokenNowPlayingThumbnail, setHasBrokenNowPlayingThumbnail] =
+    useState(false);
   const volumePopoverRef = useRef(null);
   const sleepPopoverRef = useRef(null);
   const addToPlaylistPopoverRef = useRef(null);
   const playbackQueue = playlists[playbackPlaylist] || [];
+  const addablePlaylistNames = Object.keys(playlists).filter(
+    (playlistName) =>
+      playlistName !== allTracksPlaylistName &&
+      playlistName !== recentSongsPlaylistName
+  );
   const hasPlaybackQueue = playbackQueue.length > 0;
   const currentTrack = nowPlayingTrack;
   const isSleepTimerActive = sleepSecondsRemaining > 0;
+
+  useEffect(() => {
+    setHasBrokenNowPlayingThumbnail(false);
+  }, [currentTrack?.trackThumbnail, currentTrack?.title]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -279,14 +298,51 @@ const Player = () => {
     setPlaylistActionStatus(`Created playlist "${createdPlaylistName}".`);
   };
 
+  const jumpToCurrentTrackInList = () => {
+    if (!currentTrack || !Number.isInteger(currentTrackIndex) || currentTrackIndex < 0) {
+      return;
+    }
+
+    window.dispatchEvent(
+      new CustomEvent("player:jump-to-current-track", {
+        detail: {
+          playlistName: playbackPlaylist,
+          trackIndex: currentTrackIndex,
+        },
+      })
+    );
+  };
+
   return (
     <section className="bottom-player" aria-label="Now Playing Controls">
       <div className="bottom-player-main">
         <div className="track-summary">
           <p className="panel-eyebrow">Now Playing</p>
-          <h2 className="track-summary-title" aria-live="polite">
-            {currentTrack?.title || "No track selected"}
-          </h2>
+          <div className="track-summary-main">
+            <button
+              type="button"
+              className="player-track-thumb player-track-thumb-btn"
+              onClick={jumpToCurrentTrackInList}
+              disabled={!currentTrack}
+              aria-label="Jump to current song in track list"
+            >
+              {currentTrack?.trackThumbnail && !hasBrokenNowPlayingThumbnail ? (
+                <img
+                  src={currentTrack.trackThumbnail}
+                  alt=""
+                  className="player-track-thumb-image"
+                  onError={() => setHasBrokenNowPlayingThumbnail(true)}
+                />
+              ) : (
+                <span className="player-track-thumb-icon">
+                  <MusicNoteIcon />
+                </span>
+              )}
+            </button>
+            <h2 className="track-summary-title" aria-live="polite">
+              {currentTrack?.title || "No track selected"}
+            </h2>
+          </div>
         </div>
 
         <div className="control-cluster">
@@ -438,7 +494,7 @@ const Player = () => {
               <div className="add-playlist-popover">
                 <p className="sleep-popover-title">Add to Playlist</p>
                 <div className="add-playlist-options">
-                  {Object.keys(playlists).map((playlistName) => (
+                  {addablePlaylistNames.map((playlistName) => (
                     <button
                       key={playlistName}
                       className="btn btn-ghost btn-sm add-playlist-option"
@@ -448,6 +504,11 @@ const Player = () => {
                       {playlistName}
                     </button>
                   ))}
+                  {addablePlaylistNames.length === 0 && (
+                    <p className="helper-text add-playlist-status">
+                      Create a playlist to start adding tracks.
+                    </p>
+                  )}
                 </div>
 
                 <div className="add-playlist-create-row">
