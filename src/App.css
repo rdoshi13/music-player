@@ -95,6 +95,278 @@
   font-family: var(--font-display);
 }
 
+.view-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.view-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--ink-700);
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.view-pill:hover {
+  border-color: #a8bab7;
+}
+
+.view-pill-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.playlist-browser {
+  margin: -0.1rem 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.85);
+  padding: 0.45rem;
+}
+
+.playlist-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.playlist-list-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.playlist-cover-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+  color: var(--ink-700);
+}
+
+.playlist-cover-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.playlist-cover-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 7px;
+}
+
+.playlist-icon {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.playlist-icon svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: currentColor;
+}
+
+.playlist-icon-play {
+  opacity: 0;
+  transform: scale(0.85);
+}
+
+.playlist-cover-btn .playlist-cover-image {
+  transition: opacity 140ms ease;
+}
+
+.playlist-cover-btn:hover:not(:disabled) .playlist-icon-music,
+.playlist-cover-btn:focus-visible .playlist-icon-music {
+  opacity: 0;
+  transform: scale(0.85);
+}
+
+.playlist-cover-btn:hover:not(:disabled) .playlist-icon-play,
+.playlist-cover-btn:focus-visible .playlist-icon-play {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.playlist-cover-btn:hover:not(:disabled) .playlist-cover-image,
+.playlist-cover-btn:focus-visible .playlist-cover-image {
+  opacity: 0.25;
+}
+
+.playlist-list-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ink-700);
+  cursor: pointer;
+}
+
+.playlist-list-item:hover {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.playlist-list-item-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.playlist-row-actions {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.playlist-action-btn {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink-700);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.playlist-action-btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: currentColor;
+}
+
+.playlist-action-btn:hover {
+  border-color: #a8bab7;
+  background: #f8fbfb;
+}
+
+.playlist-action-btn-danger:hover {
+  border-color: #e3b8ab;
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+}
+
+.playlist-chip-empty {
+  font-size: 0.84rem;
+  color: var(--ink-700);
+}
+
+.playlist-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 32, 0.38);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 90;
+}
+
+.playlist-modal {
+  width: min(440px, calc(100vw - 1rem));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.playlist-modal h4 {
+  font-size: 1.05rem;
+  font-family: var(--font-display);
+}
+
+.playlist-modal-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.playlist-thumbnail-picker {
+  width: 4.25rem;
+  height: 4.25rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-700);
+  overflow: hidden;
+}
+
+.playlist-thumbnail-picker svg {
+  width: 1.45rem;
+  height: 1.45rem;
+  fill: currentColor;
+}
+
+.playlist-thumbnail-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.playlist-modal-fields {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.playlist-modal-fields label {
+  font-size: 0.84rem;
+  color: var(--ink-700);
+  font-weight: 600;
+}
+
+.playlist-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip: rect(0 0 0 0);
+  overflow: hidden;
+}
+
 .select-wrap label,
 .form-block label {
   color: var(--ink-700);
@@ -138,6 +410,47 @@
 .track-item-active {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+.track-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.62rem;
+}
+
+.track-thumb {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: #fff;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.track-thumb-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.track-thumb-icon {
+  color: var(--ink-700);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.track-thumb-icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: currentColor;
 }
 
 .track-name {
@@ -534,6 +847,14 @@
 }
 
 @media (max-width: 620px) {
+  .panel-head-row {
+    align-items: flex-start;
+  }
+
+  .view-pill-group {
+    width: 100%;
+  }
+
   .track-item {
     flex-direction: column;
     align-items: flex-start;

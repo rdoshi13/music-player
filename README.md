@@ -1,5 +1,10 @@
 Vercel app - [Link](https://music-player-one-sepia.vercel.app/)
 
+Current behavior:
+
+- Local tracks can display embedded artwork thumbnails from file metadata.
+- If artwork is missing, the UI shows a music-note fallback icon.
+
 To do:
 
 - Fix playlists

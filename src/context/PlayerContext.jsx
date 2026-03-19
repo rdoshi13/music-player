@@ -8,10 +8,12 @@ import {
   saveTrackHandle,
   supportsFileSystemAccess,
 } from "../utils/localTrackStore";
+import { extractEmbeddedArtworkDataUrl } from "../utils/trackArtwork";
 
 const DEFAULT_PLAYLIST = "recent";
 const MUSIC_FOLDER_HANDLE_ID = "primary-music-folder";
 const HANDLE_STORAGE_TIMEOUT_MS = 3500;
+const PLAYLISTS_STORAGE_MAX_CHARS = 2_500_000;
 const PLAYLISTS_STORAGE_KEY = "playlists";
 const VOLUME_STORAGE_KEY = "playerVolume";
 const CURRENT_PLAYLIST_STORAGE_KEY = "currentPlaylist";
@@ -103,6 +105,7 @@ const serializeTrack = (track) => {
       fileName: track.fileName,
       relativePath: track.relativePath,
       folderHandleId: track.folderHandleId || MUSIC_FOLDER_HANDLE_ID,
+      sourceFolderName: track.sourceFolderName,
     };
   }
 
@@ -167,6 +170,8 @@ const withTimeout = async (
       window.setTimeout(() => resolve(fallbackValue), timeoutMs);
     }),
   ]);
+
+const TRACK_ARTWORK_TIMEOUT_MS = 220;
 
 export const PlayerProvider = ({ children }) => {
   const [playlists, setPlaylists] = useState({ [DEFAULT_PLAYLIST]: [] });
@@ -379,7 +384,8 @@ export const PlayerProvider = ({ children }) => {
 
   const collectAudioTracksFromDirectory = async (
     directoryHandle,
-    pathPrefix = ""
+    pathPrefix = "",
+    sourceFolderName = ""
   ) => {
     const tracks = [];
 
@@ -389,19 +395,28 @@ export const PlayerProvider = ({ children }) => {
       if (entryHandle.kind === "directory") {
         const nestedTracks = await collectAudioTracksFromDirectory(
           entryHandle,
-          nextPath
+          nextPath,
+          sourceFolderName
         );
         tracks.push(...nestedTracks);
         continue;
       }
 
       if (entryHandle.kind === "file" && isAudioFileName(entryName)) {
+        const file = await entryHandle.getFile();
+        const trackThumbnail = await withTimeout(
+          extractEmbeddedArtworkDataUrl(file),
+          TRACK_ARTWORK_TIMEOUT_MS,
+          ""
+        );
         tracks.push({
           sourceType: LOCAL_FOLDER_TRACK_TYPE,
           title: entryName,
           fileName: entryName,
           relativePath: nextPath,
           folderHandleId: MUSIC_FOLDER_HANDLE_ID,
+          sourceFolderName,
+          trackThumbnail,
         });
       }
     }
@@ -413,51 +428,100 @@ export const PlayerProvider = ({ children }) => {
     folderHandle,
     playlistName = currentPlaylist
   ) => {
-    const folderTracks = await collectAudioTracksFromDirectory(folderHandle);
+    const sourceFolderName = folderHandle?.name || "Connected music folder";
+    const folderTracks = await collectAudioTracksFromDirectory(
+      folderHandle,
+      "",
+      sourceFolderName
+    );
     if (folderTracks.length === 0) {
       return 0;
     }
 
-    const existingTracks = playlists[playlistName] || [];
-    const existingTrackKeys = new Set(
-      existingTracks
-        .filter(isLocalFolderTrack)
-        .map(
-          (track) =>
-            `${track.folderHandleId || MUSIC_FOLDER_HANDLE_ID}:${track.relativePath}`
-        )
+    const folderTrackByKey = new Map(
+      folderTracks.map((track) => [
+        `${track.folderHandleId || MUSIC_FOLDER_HANDLE_ID}:${track.relativePath}`,
+        track,
+      ])
     );
 
-    const newTracks = folderTracks.filter((track) => {
-      const key = `${track.folderHandleId}:${track.relativePath}`;
-      if (existingTrackKeys.has(key)) {
-        return false;
+    let addedCount = 0;
+    setPlaylists((previousPlaylists) => {
+      const existingTracks = previousPlaylists[playlistName] || [];
+      const existingTrackKeys = new Set();
+      let updatedExistingTracks = false;
+
+      const mergedTracks = existingTracks.map((track) => {
+        if (!isLocalFolderTrack(track)) {
+          return track;
+        }
+
+        const key = `${track.folderHandleId || MUSIC_FOLDER_HANDLE_ID}:${track.relativePath}`;
+        existingTrackKeys.add(key);
+
+        const importedTrack = folderTrackByKey.get(key);
+        if (!importedTrack) {
+          return track;
+        }
+
+        const nextSourceFolderName =
+          track.sourceFolderName || importedTrack.sourceFolderName || "";
+        const nextTrackThumbnail =
+          track.trackThumbnail || importedTrack.trackThumbnail || "";
+
+        if (
+          nextSourceFolderName === (track.sourceFolderName || "") &&
+          nextTrackThumbnail === (track.trackThumbnail || "")
+        ) {
+          return track;
+        }
+
+        updatedExistingTracks = true;
+        return {
+          ...track,
+          sourceFolderName: nextSourceFolderName,
+          trackThumbnail: nextTrackThumbnail,
+        };
+      });
+
+      const newTracks = folderTracks.filter((track) => {
+        const key = `${track.folderHandleId || MUSIC_FOLDER_HANDLE_ID}:${track.relativePath}`;
+        if (existingTrackKeys.has(key)) {
+          return false;
+        }
+        existingTrackKeys.add(key);
+        return true;
+      });
+
+      addedCount = newTracks.length;
+
+      if (!updatedExistingTracks && newTracks.length === 0) {
+        return previousPlaylists;
       }
-      existingTrackKeys.add(key);
-      return true;
+
+      return {
+        ...previousPlaylists,
+        [playlistName]: [...mergedTracks, ...newTracks],
+      };
     });
 
-    if (newTracks.length === 0) {
-      return 0;
-    }
-
-    setPlaylists((previousPlaylists) => ({
-      ...previousPlaylists,
-      [playlistName]: [...(previousPlaylists[playlistName] || []), ...newTracks],
-    }));
-
-    return newTracks.length;
+    return addedCount;
   };
 
   useEffect(() => {
     let hydratedPlaylists = { [DEFAULT_PLAYLIST]: [] };
     const storedPlaylists = localStorage.getItem(PLAYLISTS_STORAGE_KEY);
     if (storedPlaylists) {
-      try {
-        const parsedPlaylists = JSON.parse(storedPlaylists);
-        hydratedPlaylists = normalizeStoredPlaylists(parsedPlaylists);
-      } catch {
-        hydratedPlaylists = { [DEFAULT_PLAYLIST]: [] };
+      if (storedPlaylists.length > PLAYLISTS_STORAGE_MAX_CHARS) {
+        localStorage.removeItem(PLAYLISTS_STORAGE_KEY);
+      } else {
+        try {
+          const parsedPlaylists = JSON.parse(storedPlaylists);
+          hydratedPlaylists = normalizeStoredPlaylists(parsedPlaylists);
+        } catch {
+          hydratedPlaylists = { [DEFAULT_PLAYLIST]: [] };
+          localStorage.removeItem(PLAYLISTS_STORAGE_KEY);
+        }
       }
     }
     setPlaylists(hydratedPlaylists);
@@ -522,10 +586,14 @@ export const PlayerProvider = ({ children }) => {
       persistablePlaylists[DEFAULT_PLAYLIST] = [];
     }
 
-    localStorage.setItem(
-      PLAYLISTS_STORAGE_KEY,
-      JSON.stringify(persistablePlaylists)
-    );
+    try {
+      localStorage.setItem(
+        PLAYLISTS_STORAGE_KEY,
+        JSON.stringify(persistablePlaylists)
+      );
+    } catch {
+      // Prevent hard crashes when localStorage quota is reached.
+    }
   }, [isHydrated, playlists]);
 
   useEffect(() => {
@@ -760,6 +828,11 @@ export const PlayerProvider = ({ children }) => {
 
     try {
       const file = await fileHandle.getFile();
+      const trackThumbnail = await withTimeout(
+        extractEmbeddedArtworkDataUrl(file),
+        TRACK_ARTWORK_TIMEOUT_MS,
+        ""
+      );
       const localHandleId = createTrackId();
       await saveTrackHandle(localHandleId, fileHandle);
       localFileHandleCacheRef.current[localHandleId] = fileHandle;
@@ -773,6 +846,7 @@ export const PlayerProvider = ({ children }) => {
             title: file.name,
             localHandleId,
             fileName: file.name,
+            trackThumbnail,
           },
         ],
       }));
@@ -1040,6 +1114,9 @@ export const PlayerProvider = ({ children }) => {
     const serializedTrack = serializeTrack(track);
     if (!serializedTrack) {
       return false;
+    }
+    if (track.trackThumbnail) {
+      serializedTrack.trackThumbnail = track.trackThumbnail;
     }
 
     setPlaylists((previousPlaylists) => ({
