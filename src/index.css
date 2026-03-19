@@ -1,23 +1,56 @@
+:root {
+  --bg-0: #fffaf1;
+  --bg-1: #fff2dd;
+  --bg-2: #effaf6;
+  --panel: rgba(255, 255, 255, 0.82);
+  --ink-900: #212633;
+  --ink-700: #4f5868;
+  --line: #d5dfdc;
+  --accent: #0f766e;
+  --accent-strong: #0b5d57;
+  --accent-soft: #ecf9f6;
+  --danger-soft: #fff1ea;
+  --danger-ink: #9f2f0f;
+  --shadow: 0 18px 45px rgba(28, 38, 44, 0.11);
+  --radius-xl: 20px;
+  --radius-md: 12px;
+  --font-display: "Avenir Next Condensed", "Futura", "Trebuchet MS", sans-serif;
+  --font-sans: "Avenir Next", "Segoe UI", "Noto Sans", "Helvetica Neue", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
-  font-family: Arial, sans-serif;
-  text-align: center;
-  background-color: #f4f4f4;
+  margin: 0;
+  color: var(--ink-900);
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(circle at 8% 8%, #ffd8be 0%, transparent 38%),
+    radial-gradient(circle at 88% 14%, #bcefdc 0%, transparent 35%),
+    linear-gradient(150deg, var(--bg-0) 0%, var(--bg-1) 46%, var(--bg-2) 100%);
 }
 
-h1 {
-  color: #333;
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
 }
 
-button {
-  margin: 5px;
-  padding: 8px 15px;
-  cursor: pointer;
-  background-color: #008cba;
-  color: white;
-  border: none;
-  border-radius: 3px;
-}
-
-button:hover {
-  background-color: #005f73;
+button,
+input,
+select {
+  color: inherit;
+  font: inherit;
 }

@@ -1,18 +1,25 @@
-import React from 'react';
+import "./App.css";
 import { PlayerProvider } from './context/PlayerContext';
 import Player from './components/Player';
 import Playlist from './components/Playlist';
-import SleepTimer from './components/SleepTimer';
 
 function App() {
   return (
     <PlayerProvider>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <h1>My Music Player</h1>
-        <Player />
-        <Playlist />
-        <SleepTimer />
-      </div>
+      <main className="app-shell">
+        <header className="hero">
+          <p className="hero-kicker">Local Audio Control</p>
+          <h1>My Music Player</h1>
+          <p className="hero-subtitle">
+            Queue tracks, manage playlists, and control playback from the bottom dock.
+          </p>
+        </header>
+
+        <section className="app-grid" aria-label="Music Player Dashboard">
+          <Playlist />
+        </section>
+      </main>
+      <Player />
     </PlayerProvider>
   );
 }
