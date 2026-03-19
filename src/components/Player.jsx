@@ -189,6 +189,67 @@ const Player = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const isTypingTarget = (target) => {
+      if (!(target instanceof HTMLElement)) {
+        return false;
+      }
+
+      const tagName = target.tagName;
+      if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT") {
+        return true;
+      }
+
+      if (target.isContentEditable || target.closest("[contenteditable='true']")) {
+        return true;
+      }
+
+      return false;
+    };
+
+    const handleGlobalKeyDown = (event) => {
+      const isSpaceKey =
+        event.code === "Space" || event.key === " " || event.key === "Spacebar";
+      if (!isSpaceKey) {
+        return;
+      }
+
+      if (event.altKey || event.ctrlKey || event.metaKey) {
+        return;
+      }
+
+      if (isTypingTarget(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (!hasPlaybackQueue) {
+        return;
+      }
+
+      if (!audioRef.current.src) {
+        void playTrack(currentTrackIndex, playbackPlaylist);
+        return;
+      }
+
+      if (audioRef.current.paused) {
+        const playPromise = audioRef.current.play();
+        if (playPromise?.catch) {
+          playPromise.catch(() => undefined);
+        }
+        return;
+      }
+
+      audioRef.current.pause();
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleGlobalKeyDown);
+    };
+  }, [audioRef, currentTrackIndex, hasPlaybackQueue, playbackPlaylist, playTrack]);
+
   const togglePlayPause = () => {
     if (!hasPlaybackQueue) {
       return;

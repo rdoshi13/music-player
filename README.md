@@ -9,8 +9,6 @@ Current behavior:
 
 To do:
 
-- Fix playlists
-- Fix spacebar does not pause but stops.
 - Add queue.
 - Add settings
 - Add accounts - mostly google auth
