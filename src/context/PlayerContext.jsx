@@ -187,6 +187,9 @@ const EQ_MID_FREQUENCY_HZ = 1100;
 const EQ_MID_Q = 0.85;
 const EQ_TREBLE_FREQUENCY_HZ = 3600;
 const EQ_OUTPUT_CEILING_GAIN = 0.9;
+const CROSSFADE_STEP_MS = 40;
+const CROSSFADE_MIN_SECONDS = 1;
+const CROSSFADE_MAX_SECONDS = 12;
 
 export const PlayerProvider = ({ children }) => {
   const { settings, isSettingsLoading } = useSettings();
@@ -215,6 +218,11 @@ export const PlayerProvider = ({ children }) => {
   const pendingPlaybackSessionRef = useRef(null);
   const hasAppliedPlaybackStartupRef = useRef(false);
   const hasAttemptedAutoRescanRef = useRef(false);
+  const crossfadeOutgoingAudioRef = useRef(null);
+  const crossfadeTimerIdsRef = useRef([]);
+  const crossfadeTransitionActiveRef = useRef(false);
+  const crossfadeTriggeredTrackRef = useRef("");
+  const suppressPauseCleanupRef = useRef(false);
   const audioContextRef = useRef(null);
   const mediaElementSourceRef = useRef(null);
   const equalizerNodesRef = useRef(null);
@@ -223,6 +231,11 @@ export const PlayerProvider = ({ children }) => {
   const autoRescanOnLaunch = settings.library.autoRescanOnLaunch;
   const duplicateHandling = settings.library.duplicateHandling;
   const folderSortMode = settings.library.folderSortMode;
+  const isCrossfadeEnabled = Boolean(settings.crossfade.enabled);
+  const crossfadeSeconds = Math.max(
+    CROSSFADE_MIN_SECONDS,
+    Math.min(CROSSFADE_MAX_SECONDS, Number(settings.crossfade.seconds) || 0)
+  );
 
   const getAudioContextConstructor = useCallback(() => {
     if (typeof window === "undefined") {
@@ -381,6 +394,129 @@ export const PlayerProvider = ({ children }) => {
       return false;
     }
   }, [ensureEqualizerGraph]);
+
+  const clearCrossfadeTimers = useCallback(() => {
+    crossfadeTimerIdsRef.current.forEach((timerId) => {
+      window.clearInterval(timerId);
+    });
+    crossfadeTimerIdsRef.current = [];
+  }, []);
+
+  const stopOutgoingCrossfadeAudio = useCallback(() => {
+    const outgoingAudio = crossfadeOutgoingAudioRef.current;
+    if (!outgoingAudio) {
+      return;
+    }
+
+    try {
+      outgoingAudio.pause();
+    } catch {
+      // Best-effort cleanup.
+    }
+
+    try {
+      outgoingAudio.removeAttribute("src");
+      outgoingAudio.load();
+    } catch {
+      // Best-effort cleanup.
+    }
+  }, []);
+
+  const stopCrossfadeTransition = useCallback(() => {
+    clearCrossfadeTimers();
+    stopOutgoingCrossfadeAudio();
+    crossfadeTransitionActiveRef.current = false;
+  }, [clearCrossfadeTimers, stopOutgoingCrossfadeAudio]);
+
+  const animateAudioVolume = useCallback(
+    (audioElement, fromVolume, toVolume, durationSeconds, onComplete) => {
+      if (!audioElement) {
+        if (typeof onComplete === "function") {
+          onComplete();
+        }
+        return;
+      }
+
+      const safeStart = Math.max(0, Math.min(1, fromVolume));
+      const safeEnd = Math.max(0, Math.min(1, toVolume));
+      const safeDurationMs = Math.max(120, Math.round(durationSeconds * 1000));
+      const startedAt = Date.now();
+
+      audioElement.volume = safeStart;
+
+      const timerId = window.setInterval(() => {
+        const elapsedMs = Date.now() - startedAt;
+        const progress = Math.min(1, elapsedMs / safeDurationMs);
+        const nextVolume = safeStart + (safeEnd - safeStart) * progress;
+        audioElement.volume = Math.max(0, Math.min(1, nextVolume));
+
+        if (progress >= 1) {
+          window.clearInterval(timerId);
+          crossfadeTimerIdsRef.current = crossfadeTimerIdsRef.current.filter(
+            (activeTimerId) => activeTimerId !== timerId
+          );
+
+          if (typeof onComplete === "function") {
+            onComplete();
+          }
+        }
+      }, CROSSFADE_STEP_MS);
+
+      crossfadeTimerIdsRef.current.push(timerId);
+    },
+    []
+  );
+
+  const startOutgoingCrossfade = useCallback(
+    async (durationSeconds) => {
+      const activeAudio = audioRef.current;
+      if (!activeAudio?.src || activeAudio.paused) {
+        return false;
+      }
+
+      clearCrossfadeTimers();
+      stopOutgoingCrossfadeAudio();
+
+      if (!crossfadeOutgoingAudioRef.current) {
+        crossfadeOutgoingAudioRef.current = new Audio();
+      }
+
+      const outgoingAudio = crossfadeOutgoingAudioRef.current;
+
+      try {
+        outgoingAudio.src = activeAudio.src;
+        outgoingAudio.currentTime = Math.max(0, activeAudio.currentTime || 0);
+        outgoingAudio.playbackRate = activeAudio.playbackRate || 1;
+        outgoingAudio.volume = Math.max(0, Math.min(1, volume));
+
+        const playPromise = outgoingAudio.play();
+        if (playPromise?.catch) {
+          try {
+            await playPromise;
+          } catch {
+            return false;
+          }
+        }
+
+        animateAudioVolume(
+          outgoingAudio,
+          outgoingAudio.volume,
+          0,
+          durationSeconds,
+          () => {
+            stopOutgoingCrossfadeAudio();
+            crossfadeTransitionActiveRef.current = false;
+          }
+        );
+
+        return true;
+      } catch {
+        stopOutgoingCrossfadeAudio();
+        return false;
+      }
+    },
+    [animateAudioVolume, clearCrossfadeTimers, stopOutgoingCrossfadeAudio, volume]
+  );
 
   const createTrackId = () =>
     globalThis.crypto?.randomUUID?.() ??
@@ -1043,6 +1179,9 @@ export const PlayerProvider = ({ children }) => {
 
   useEffect(() => {
     audioRef.current.volume = volume;
+    if (crossfadeOutgoingAudioRef.current && !crossfadeTransitionActiveRef.current) {
+      crossfadeOutgoingAudioRef.current.volume = volume;
+    }
     localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
   }, [volume]);
 
@@ -1054,6 +1193,8 @@ export const PlayerProvider = ({ children }) => {
       localTrackUrlCacheRef.current = {};
       localFileHandleCacheRef.current = {};
       musicFolderHandleRef.current = null;
+      stopCrossfadeTransition();
+      crossfadeTriggeredTrackRef.current = "";
 
       if (equalizerNodesRef.current) {
         const { bassNode, midNode, trebleNode, outputGainNode } = equalizerNodesRef.current;
@@ -1099,7 +1240,7 @@ export const PlayerProvider = ({ children }) => {
         });
       }
     },
-    []
+    [stopCrossfadeTransition]
   );
 
   useEffect(() => {
@@ -1187,6 +1328,8 @@ export const PlayerProvider = ({ children }) => {
   ]);
 
   const stopPlayback = () => {
+    stopCrossfadeTransition();
+    crossfadeTriggeredTrackRef.current = "";
     audioRef.current.pause();
     audioRef.current.src = "";
     setIsPlaying(false);
@@ -1219,7 +1362,12 @@ export const PlayerProvider = ({ children }) => {
     return "";
   };
 
-  const playTrack = async (index, playlistName = currentPlaylist) => {
+  const playTrack = async (
+    index,
+    playlistName = currentPlaylist,
+    options = {}
+  ) => {
+    const { disableCrossfade = false } = options;
     const playlist = playlists[playlistName] || [];
     if (playlist.length === 0 || index < 0 || index >= playlist.length) {
       return;
@@ -1255,9 +1403,20 @@ export const PlayerProvider = ({ children }) => {
       return;
     }
 
-    const startPlayback = async (url) => {
+    const switchingToSameTrack =
+      playbackPlaylist === playlistName && currentTrackIndex === index;
+    const shouldCrossfade =
+      !disableCrossfade &&
+      isCrossfadeEnabled &&
+      !switchingToSameTrack &&
+      Boolean(audioRef.current?.src) &&
+      !audioRef.current.paused &&
+      isPlaying;
+
+    const startPlayback = async (url, fadeInSeconds = 0) => {
       audioRef.current.src = url;
       audioRef.current.currentTime = 0;
+      audioRef.current.volume = fadeInSeconds > 0 ? 0 : volume;
       try {
         audioRef.current.load();
       } catch {
@@ -1266,6 +1425,7 @@ export const PlayerProvider = ({ children }) => {
       // Never block playback on audio engine resume.
       void resumeAudioEngine();
       const playPromise = audioRef.current.play();
+      let hasStarted = !audioRef.current.paused;
       if (playPromise?.catch) {
         try {
           await Promise.race([
@@ -1277,15 +1437,41 @@ export const PlayerProvider = ({ children }) => {
               );
             }),
           ]);
-          return !audioRef.current.paused;
+          hasStarted = !audioRef.current.paused;
         } catch {
           return false;
         }
       }
-      return !audioRef.current.paused;
+
+      if (!hasStarted) {
+        return false;
+      }
+
+      if (fadeInSeconds > 0) {
+        animateAudioVolume(audioRef.current, 0, volume, fadeInSeconds, () => {
+          crossfadeTransitionActiveRef.current = false;
+        });
+      }
+
+      return true;
     };
 
-    let started = await startPlayback(playableUrl);
+    let activeFadeSeconds = 0;
+    if (shouldCrossfade) {
+      crossfadeTransitionActiveRef.current = true;
+      const outgoingStarted = await startOutgoingCrossfade(crossfadeSeconds);
+      if (!outgoingStarted) {
+        crossfadeTransitionActiveRef.current = false;
+      } else {
+        activeFadeSeconds = crossfadeSeconds;
+      }
+    } else {
+      stopCrossfadeTransition();
+    }
+
+    suppressPauseCleanupRef.current = true;
+    let started = await startPlayback(playableUrl, activeFadeSeconds);
+    suppressPauseCleanupRef.current = false;
     if (requestId !== playTrackRequestIdRef.current) {
       return;
     }
@@ -1297,11 +1483,14 @@ export const PlayerProvider = ({ children }) => {
       }
 
       if (refreshedUrl) {
-        started = await startPlayback(refreshedUrl);
+        suppressPauseCleanupRef.current = true;
+        started = await startPlayback(refreshedUrl, activeFadeSeconds);
+        suppressPauseCleanupRef.current = false;
       }
     }
 
     if (!started) {
+      stopCrossfadeTransition();
       setIsPlaying(false);
       return;
     }
@@ -1309,6 +1498,7 @@ export const PlayerProvider = ({ children }) => {
     setCurrentTrackIndex(index);
     setPlaybackPlaylist(playlistName);
     setNowPlayingTrack(nextTrack);
+    crossfadeTriggeredTrackRef.current = "";
     updateRecentSongs(nextTrack);
   };
 
@@ -1321,7 +1511,50 @@ export const PlayerProvider = ({ children }) => {
       setIsPlaying(true);
       void resumeAudioEngine();
     };
-    const handlePause = () => setIsPlaying(false);
+    const handlePause = () => {
+      setIsPlaying(false);
+      if (!suppressPauseCleanupRef.current) {
+        stopCrossfadeTransition();
+      }
+    };
+    const handleTimeUpdate = () => {
+      if (
+        !isCrossfadeEnabled ||
+        crossfadeTransitionActiveRef.current ||
+        !isPlaying
+      ) {
+        return;
+      }
+
+      const playlist = playlists[playbackPlaylist] || [];
+      const nextIndex = currentTrackIndex + 1;
+      if (nextIndex >= playlist.length) {
+        return;
+      }
+
+      const duration = Number(audio.duration);
+      const currentTime = Number(audio.currentTime);
+      if (!Number.isFinite(duration) || !Number.isFinite(currentTime) || duration <= 0) {
+        return;
+      }
+
+      const remainingSeconds = duration - currentTime;
+      if (remainingSeconds > crossfadeSeconds) {
+        return;
+      }
+
+      const triggerKey = `${playbackPlaylist}:${currentTrackIndex}`;
+      if (crossfadeTriggeredTrackRef.current === triggerKey) {
+        return;
+      }
+      crossfadeTriggeredTrackRef.current = triggerKey;
+
+      if (playTrackRef.current) {
+        void playTrackRef.current(nextIndex, playbackPlaylist, {
+          disableCrossfade: false,
+        });
+      }
+    };
     const handleEnded = () => {
       const playlist = playlists[playbackPlaylist] || [];
       const nextIndex = currentTrackIndex + 1;
@@ -1335,14 +1568,25 @@ export const PlayerProvider = ({ children }) => {
 
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("pause", handlePause);
+    audio.addEventListener("timeupdate", handleTimeUpdate);
     audio.addEventListener("ended", handleEnded);
 
     return () => {
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
       audio.removeEventListener("ended", handleEnded);
     };
-  }, [currentTrackIndex, playbackPlaylist, playlists, resumeAudioEngine]);
+  }, [
+    crossfadeSeconds,
+    currentTrackIndex,
+    isCrossfadeEnabled,
+    isPlaying,
+    playbackPlaylist,
+    playlists,
+    resumeAudioEngine,
+    stopCrossfadeTransition,
+  ]);
 
   const addToPlaylist = (track, playlistName = currentPlaylist) => {
     if (!isRemoteTrack(track)) {
