@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PlayerContext } from "./AppPlayerContext";
 import { useSettings } from "./useSettings";
 import {
@@ -182,6 +182,11 @@ const withTimeout = async (
 const TRACK_ARTWORK_TIMEOUT_MS = 220;
 const BACKGROUND_THUMBNAIL_BATCH_SIZE = 35;
 const PLAYBACK_START_TIMEOUT_MS = 2000;
+const EQ_BASS_FREQUENCY_HZ = 220;
+const EQ_MID_FREQUENCY_HZ = 1100;
+const EQ_MID_Q = 0.85;
+const EQ_TREBLE_FREQUENCY_HZ = 3600;
+const EQ_OUTPUT_CEILING_GAIN = 0.9;
 
 export const PlayerProvider = ({ children }) => {
   const { settings, isSettingsLoading } = useSettings();
@@ -210,11 +215,172 @@ export const PlayerProvider = ({ children }) => {
   const pendingPlaybackSessionRef = useRef(null);
   const hasAppliedPlaybackStartupRef = useRef(false);
   const hasAttemptedAutoRescanRef = useRef(false);
+  const audioContextRef = useRef(null);
+  const mediaElementSourceRef = useRef(null);
+  const equalizerNodesRef = useRef(null);
 
   const playbackAutoplayBehavior = settings.playback.autoplayBehavior;
   const autoRescanOnLaunch = settings.library.autoRescanOnLaunch;
   const duplicateHandling = settings.library.duplicateHandling;
   const folderSortMode = settings.library.folderSortMode;
+
+  const getAudioContextConstructor = useCallback(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return window.AudioContext || window.webkitAudioContext || null;
+  }, []);
+
+  const ensureEqualizerGraph = useCallback(() => {
+    if (equalizerNodesRef.current && mediaElementSourceRef.current && audioContextRef.current) {
+      return true;
+    }
+
+    const AudioContextCtor = getAudioContextConstructor();
+    if (!AudioContextCtor) {
+      return false;
+    }
+
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContextCtor();
+      }
+
+      const audioContext = audioContextRef.current;
+      const audioElement = audioRef.current;
+      if (!audioElement) {
+        return false;
+      }
+
+      // Avoid creating the source node before media src is set; some browsers
+      // can get into a bad playback state when the graph is initialized too early.
+      if (!mediaElementSourceRef.current && !audioElement.src) {
+        return false;
+      }
+
+      if (!mediaElementSourceRef.current) {
+        mediaElementSourceRef.current = audioContext.createMediaElementSource(audioElement);
+      }
+
+      if (!equalizerNodesRef.current) {
+        const bassNode = audioContext.createBiquadFilter();
+        bassNode.type = "lowshelf";
+        bassNode.frequency.value = EQ_BASS_FREQUENCY_HZ;
+
+        const midNode = audioContext.createBiquadFilter();
+        midNode.type = "peaking";
+        midNode.frequency.value = EQ_MID_FREQUENCY_HZ;
+        midNode.Q.value = EQ_MID_Q;
+
+        const trebleNode = audioContext.createBiquadFilter();
+        trebleNode.type = "highshelf";
+        trebleNode.frequency.value = EQ_TREBLE_FREQUENCY_HZ;
+
+        const outputGainNode = audioContext.createGain();
+        outputGainNode.gain.value = EQ_OUTPUT_CEILING_GAIN;
+
+        mediaElementSourceRef.current.connect(bassNode);
+        bassNode.connect(midNode);
+        midNode.connect(trebleNode);
+        trebleNode.connect(outputGainNode);
+        outputGainNode.connect(audioContext.destination);
+
+        equalizerNodesRef.current = {
+          bassNode,
+          midNode,
+          trebleNode,
+          outputGainNode,
+        };
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }, [getAudioContextConstructor]);
+
+  const applyEqualizerSettings = useCallback(() => {
+    if (!ensureEqualizerGraph()) {
+      return false;
+    }
+
+    const audioContext = audioContextRef.current;
+    const equalizerNodes = equalizerNodesRef.current;
+    if (!audioContext || !equalizerNodes) {
+      return false;
+    }
+
+    const applyGain = (node, gainValue) => {
+      const normalizedGain = Number.isFinite(gainValue) ? gainValue : 0;
+      if (typeof node.gain.setTargetAtTime === "function") {
+        node.gain.setTargetAtTime(normalizedGain, audioContext.currentTime, 0.012);
+        return;
+      }
+      node.gain.value = normalizedGain;
+    };
+
+    const bassGainDb = Number.isFinite(settings.equalizer.bass)
+      ? settings.equalizer.bass
+      : 0;
+    const midGainDb = Number.isFinite(settings.equalizer.mid)
+      ? settings.equalizer.mid
+      : 0;
+    const trebleGainDb = Number.isFinite(settings.equalizer.treble)
+      ? settings.equalizer.treble
+      : 0;
+
+    applyGain(equalizerNodes.bassNode, bassGainDb);
+    applyGain(equalizerNodes.midNode, midGainDb);
+    applyGain(equalizerNodes.trebleNode, trebleGainDb);
+
+    if (equalizerNodes.outputGainNode?.gain) {
+      const highestPositiveEqGain = Math.max(0, bassGainDb, midGainDb, trebleGainDb);
+      const compensationLinear = Math.pow(10, (-highestPositiveEqGain) / 20);
+      const targetOutputGain = Math.max(
+        0,
+        Math.min(1, EQ_OUTPUT_CEILING_GAIN * compensationLinear)
+      );
+
+      if (typeof equalizerNodes.outputGainNode.gain.setTargetAtTime === "function") {
+        equalizerNodes.outputGainNode.gain.setTargetAtTime(
+          targetOutputGain,
+          audioContext.currentTime,
+          0.012
+        );
+      } else {
+        equalizerNodes.outputGainNode.gain.value = targetOutputGain;
+      }
+    }
+    return true;
+  }, [
+    ensureEqualizerGraph,
+    settings.equalizer.bass,
+    settings.equalizer.mid,
+    settings.equalizer.treble,
+  ]);
+
+  const resumeAudioEngine = useCallback(async () => {
+    if (!ensureEqualizerGraph()) {
+      return false;
+    }
+
+    const audioContext = audioContextRef.current;
+    if (!audioContext) {
+      return false;
+    }
+
+    if (audioContext.state === "running") {
+      return Boolean(audioContext);
+    }
+
+    try {
+      await audioContext.resume();
+      return audioContext.state === "running";
+    } catch {
+      return false;
+    }
+  }, [ensureEqualizerGraph]);
 
   const createTrackId = () =>
     globalThis.crypto?.randomUUID?.() ??
@@ -888,9 +1054,66 @@ export const PlayerProvider = ({ children }) => {
       localTrackUrlCacheRef.current = {};
       localFileHandleCacheRef.current = {};
       musicFolderHandleRef.current = null;
+
+      if (equalizerNodesRef.current) {
+        const { bassNode, midNode, trebleNode, outputGainNode } = equalizerNodesRef.current;
+        try {
+          bassNode.disconnect();
+        } catch {
+          // Best-effort cleanup.
+        }
+        try {
+          midNode.disconnect();
+        } catch {
+          // Best-effort cleanup.
+        }
+        try {
+          trebleNode.disconnect();
+        } catch {
+          // Best-effort cleanup.
+        }
+        if (outputGainNode) {
+          try {
+            outputGainNode.disconnect();
+          } catch {
+            // Best-effort cleanup.
+          }
+        }
+        equalizerNodesRef.current = null;
+      }
+
+      if (mediaElementSourceRef.current) {
+        try {
+          mediaElementSourceRef.current.disconnect();
+        } catch {
+          // Best-effort cleanup.
+        }
+        mediaElementSourceRef.current = null;
+      }
+
+      const audioContext = audioContextRef.current;
+      audioContextRef.current = null;
+      if (audioContext && typeof audioContext.close === "function") {
+        void audioContext.close().catch(() => {
+          // Best-effort cleanup.
+        });
+      }
     },
     []
   );
+
+  useEffect(() => {
+    if (isSettingsLoading) {
+      return;
+    }
+    applyEqualizerSettings();
+  }, [
+    applyEqualizerSettings,
+    isSettingsLoading,
+    settings.equalizer.bass,
+    settings.equalizer.mid,
+    settings.equalizer.treble,
+  ]);
 
   useEffect(() => {
     if (!isHydrated || isSettingsLoading) {
@@ -1040,6 +1263,8 @@ export const PlayerProvider = ({ children }) => {
       } catch {
         // Ignore load failures and still attempt play.
       }
+      // Never block playback on audio engine resume.
+      void resumeAudioEngine();
       const playPromise = audioRef.current.play();
       if (playPromise?.catch) {
         try {
@@ -1092,7 +1317,10 @@ export const PlayerProvider = ({ children }) => {
   useEffect(() => {
     const audio = audioRef.current;
 
-    const handlePlay = () => setIsPlaying(true);
+    const handlePlay = () => {
+      setIsPlaying(true);
+      void resumeAudioEngine();
+    };
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => {
       const playlist = playlists[playbackPlaylist] || [];
@@ -1114,7 +1342,7 @@ export const PlayerProvider = ({ children }) => {
       audio.removeEventListener("pause", handlePause);
       audio.removeEventListener("ended", handleEnded);
     };
-  }, [currentTrackIndex, playbackPlaylist, playlists]);
+  }, [currentTrackIndex, playbackPlaylist, playlists, resumeAudioEngine]);
 
   const addToPlaylist = (track, playlistName = currentPlaylist) => {
     if (!isRemoteTrack(track)) {
@@ -1555,6 +1783,7 @@ export const PlayerProvider = ({ children }) => {
     volume,
     setVolume,
     audioRef,
+    resumeAudioEngine,
     playTrack,
     addToPlaylist,
     addLocalFileHandle,

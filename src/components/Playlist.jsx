@@ -97,6 +97,7 @@ const Playlist = () => {
     hasConnectedMusicFolder,
     connectMusicFolder,
     syncMusicFolder,
+    resumeAudioEngine,
     removeAllSyncedTracks,
     removeFromPlaylist,
     renamePlaylist,
@@ -653,6 +654,7 @@ const Playlist = () => {
               return;
             }
 
+            void resumeAudioEngine();
             const playPromise = audioRef.current.play();
             if (playPromise?.catch) {
               playPromise.catch(() => undefined);

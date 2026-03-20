@@ -73,6 +73,7 @@ const Player = () => {
     ensurePlaylist,
     addTrackToPlaylist,
     audioRef,
+    resumeAudioEngine,
     playTrack,
     allTracksPlaylistName,
     recentSongsPlaylistName,
@@ -242,6 +243,7 @@ const Player = () => {
         }
 
         if (audioRef.current.paused) {
+          void resumeAudioEngine();
           const playPromise = audioRef.current.play();
           if (playPromise?.catch) {
             playPromise.catch(() => undefined);
@@ -285,6 +287,7 @@ const Player = () => {
     playbackPlaylist,
     playbackQueue.length,
     playTrack,
+    resumeAudioEngine,
     spacebarHotkeyEnabled,
   ]);
 
@@ -303,6 +306,7 @@ const Player = () => {
     if (isPlaying) {
       audioRef.current.pause();
     } else {
+      void resumeAudioEngine();
       const playPromise = audioRef.current.play();
       if (playPromise?.catch) {
         playPromise.catch(() => undefined);
