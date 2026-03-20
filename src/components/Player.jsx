@@ -1,37 +1,6 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { PlayerContext } from "../context/AppPlayerContext";
-
-const PLAYER_SETTINGS_STORAGE_KEY = "playerSettings";
-const DEFAULT_HOTKEY_SETTINGS = {
-  hotkeysEnabled: true,
-  spacebarPlayPauseEnabled: true,
-};
-
-const getHotkeySettings = () => {
-  const storedSettings = localStorage.getItem(PLAYER_SETTINGS_STORAGE_KEY);
-  if (!storedSettings) {
-    return DEFAULT_HOTKEY_SETTINGS;
-  }
-
-  try {
-    const parsedSettings = JSON.parse(storedSettings);
-    if (!parsedSettings || typeof parsedSettings !== "object") {
-      return DEFAULT_HOTKEY_SETTINGS;
-    }
-    return {
-      hotkeysEnabled:
-        parsedSettings.hotkeysEnabled === undefined
-          ? true
-          : Boolean(parsedSettings.hotkeysEnabled),
-      spacebarPlayPauseEnabled:
-        parsedSettings.spacebarPlayPauseEnabled === undefined
-          ? true
-          : Boolean(parsedSettings.spacebarPlayPauseEnabled),
-    };
-  } catch {
-    return DEFAULT_HOTKEY_SETTINGS;
-  }
-};
+import { useSettings } from "../context/useSettings";
 
 const formatTime = (seconds) => {
   if (!Number.isFinite(seconds) || seconds < 0) {
@@ -108,6 +77,7 @@ const Player = () => {
     allTracksPlaylistName,
     recentSongsPlaylistName,
   } = useContext(PlayerContext);
+  const { settings } = useSettings();
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -120,7 +90,6 @@ const Player = () => {
   const [playlistActionStatus, setPlaylistActionStatus] = useState("");
   const [hasBrokenNowPlayingThumbnail, setHasBrokenNowPlayingThumbnail] =
     useState(false);
-  const [hotkeySettings, setHotkeySettings] = useState(() => getHotkeySettings());
   const volumePopoverRef = useRef(null);
   const sleepPopoverRef = useRef(null);
   const addToPlaylistPopoverRef = useRef(null);
@@ -133,6 +102,9 @@ const Player = () => {
   const hasPlaybackQueue = playbackQueue.length > 0;
   const currentTrack = nowPlayingTrack;
   const isSleepTimerActive = sleepSecondsRemaining > 0;
+  const hotkeysEnabled = settings.hotkeys.enabled;
+  const spacebarHotkeyEnabled = settings.hotkeys.spacebarPlayPauseEnabled;
+  const nextPreviousHotkeysEnabled = settings.hotkeys.nextPreviousKeysEnabled;
 
   useEffect(() => {
     setHasBrokenNowPlayingThumbnail(false);
@@ -223,40 +195,6 @@ const Player = () => {
   }, []);
 
   useEffect(() => {
-    const handleSettingsUpdated = (event) => {
-      const nextSettings = event?.detail;
-      if (!nextSettings || typeof nextSettings !== "object") {
-        setHotkeySettings(getHotkeySettings());
-        return;
-      }
-
-      setHotkeySettings({
-        hotkeysEnabled:
-          nextSettings.hotkeysEnabled === undefined
-            ? true
-            : Boolean(nextSettings.hotkeysEnabled),
-        spacebarPlayPauseEnabled:
-          nextSettings.spacebarPlayPauseEnabled === undefined
-            ? true
-            : Boolean(nextSettings.spacebarPlayPauseEnabled),
-      });
-    };
-
-    const handleStorageChange = (event) => {
-      if (event.key === PLAYER_SETTINGS_STORAGE_KEY) {
-        setHotkeySettings(getHotkeySettings());
-      }
-    };
-
-    window.addEventListener("player:settings-updated", handleSettingsUpdated);
-    window.addEventListener("storage", handleStorageChange);
-    return () => {
-      window.removeEventListener("player:settings-updated", handleSettingsUpdated);
-      window.removeEventListener("storage", handleStorageChange);
-    };
-  }, []);
-
-  useEffect(() => {
     const isTypingTarget = (target) => {
       if (!(target instanceof HTMLElement)) {
         return false;
@@ -283,7 +221,7 @@ const Player = () => {
         return;
       }
 
-      if (!hotkeySettings.hotkeysEnabled) {
+      if (!hotkeysEnabled) {
         return;
       }
 
@@ -291,7 +229,7 @@ const Player = () => {
       const isSpaceKey =
         event.code === "Space" || event.key === " " || event.key === "Spacebar";
 
-      if (isSpaceKey && hotkeySettings.spacebarPlayPauseEnabled) {
+      if (isSpaceKey && spacebarHotkeyEnabled) {
         event.preventDefault();
 
         if (!hasPlaybackQueue) {
@@ -319,14 +257,14 @@ const Player = () => {
         return;
       }
 
-      if (pressedKey === "n") {
+      if (nextPreviousHotkeysEnabled && pressedKey === "n") {
         event.preventDefault();
         const nextIndex = (currentTrackIndex + 1 + playbackQueue.length) % playbackQueue.length;
         void playTrack(nextIndex, playbackPlaylist);
         return;
       }
 
-      if (pressedKey === "p") {
+      if (nextPreviousHotkeysEnabled && pressedKey === "p") {
         event.preventDefault();
         const previousIndex =
           (currentTrackIndex - 1 + playbackQueue.length) % playbackQueue.length;
@@ -342,11 +280,12 @@ const Player = () => {
     audioRef,
     currentTrackIndex,
     hasPlaybackQueue,
-    hotkeySettings.hotkeysEnabled,
-    hotkeySettings.spacebarPlayPauseEnabled,
+    hotkeysEnabled,
+    nextPreviousHotkeysEnabled,
     playbackPlaylist,
     playbackQueue.length,
     playTrack,
+    spacebarHotkeyEnabled,
   ]);
 
   const togglePlayPause = () => {

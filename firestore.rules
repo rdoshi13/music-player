@@ -1,0 +1,172 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isTheme(theme) {
+      return theme is string && (theme == "light" || theme == "dark");
+    }
+
+    function isAutoplayBehavior(value) {
+      return value is string &&
+        (
+          value == "resume-last-session" ||
+          value == "stay-paused" ||
+          value == "play-immediately"
+        );
+    }
+
+    function isEqualizerPreset(value) {
+      return value is string &&
+        (
+          value == "flat" ||
+          value == "bassBoost" ||
+          value == "vocalBoost" ||
+          value == "trebleBoost" ||
+          value == "custom"
+        );
+    }
+
+    function isDuplicateHandling(value) {
+      return value is string &&
+        (
+          value == "skip-duplicates" ||
+          value == "keep-both" ||
+          value == "replace-existing"
+        );
+    }
+
+    function isFolderSortMode(value) {
+      return value is string &&
+        (
+          value == "recent-first" ||
+          value == "alphabetical" ||
+          value == "manual-order"
+        );
+    }
+
+    function validUi(ui) {
+      return ui is map &&
+        ui.keys().hasOnly(["theme"]) &&
+        isTheme(ui.theme);
+    }
+
+    function validAccount(account) {
+      return account is map &&
+        account.keys().hasOnly(["displayName", "email", "photoURL"]) &&
+        account.displayName is string &&
+        account.email is string &&
+        account.photoURL is string;
+    }
+
+    function validPlayback(playback) {
+      return playback is map &&
+        playback.keys().hasOnly([
+          "gaplessPlaybackEnabled",
+          "normalizeVolumeEnabled",
+          "autoplayBehavior"
+        ]) &&
+        playback.gaplessPlaybackEnabled is bool &&
+        playback.normalizeVolumeEnabled is bool &&
+        isAutoplayBehavior(playback.autoplayBehavior);
+    }
+
+    function validCrossfade(crossfade) {
+      return crossfade is map &&
+        crossfade.keys().hasOnly(["enabled", "seconds"]) &&
+        crossfade.enabled is bool &&
+        crossfade.seconds is int &&
+        crossfade.seconds >= 1 &&
+        crossfade.seconds <= 12;
+    }
+
+    function validEqualizer(equalizer) {
+      return equalizer is map &&
+        equalizer.keys().hasOnly(["preset", "bass", "mid", "treble"]) &&
+        isEqualizerPreset(equalizer.preset) &&
+        equalizer.bass is int &&
+        equalizer.mid is int &&
+        equalizer.treble is int &&
+        equalizer.bass >= -12 && equalizer.bass <= 12 &&
+        equalizer.mid >= -12 && equalizer.mid <= 12 &&
+        equalizer.treble >= -12 && equalizer.treble <= 12;
+    }
+
+    function validHotkeys(hotkeys) {
+      return hotkeys is map &&
+        hotkeys.keys().hasOnly([
+          "enabled",
+          "spacebarPlayPauseEnabled",
+          "arrowSeekEnabled",
+          "nextPreviousKeysEnabled"
+        ]) &&
+        hotkeys.enabled is bool &&
+        hotkeys.spacebarPlayPauseEnabled is bool &&
+        hotkeys.arrowSeekEnabled is bool &&
+        hotkeys.nextPreviousKeysEnabled is bool;
+    }
+
+    function validLibrary(library) {
+      return library is map &&
+        library.keys().hasOnly([
+          "autoRescanOnLaunch",
+          "duplicateHandling",
+          "folderSortMode"
+        ]) &&
+        library.autoRescanOnLaunch is bool &&
+        isDuplicateHandling(library.duplicateHandling) &&
+        isFolderSortMode(library.folderSortMode);
+    }
+
+    function validData(data) {
+      return data is map &&
+        data.keys().hasOnly([
+          "includeThumbnailsInExport",
+          "backupReminderDismissed"
+        ]) &&
+        data.includeThumbnailsInExport is bool &&
+        data.backupReminderDismissed is bool;
+    }
+
+    function validSettingsDocument(data) {
+      return data is map &&
+        data.keys().hasOnly([
+          "schemaVersion",
+          "updatedAtMs",
+          "updatedAt",
+          "ui",
+          "account",
+          "playback",
+          "crossfade",
+          "equalizer",
+          "hotkeys",
+          "library",
+          "data"
+        ]) &&
+        data.schemaVersion == 1 &&
+        data.updatedAtMs is int &&
+        data.updatedAt is timestamp &&
+        validUi(data.ui) &&
+        validAccount(data.account) &&
+        validPlayback(data.playback) &&
+        validCrossfade(data.crossfade) &&
+        validEqualizer(data.equalizer) &&
+        validHotkeys(data.hotkeys) &&
+        validLibrary(data.library) &&
+        validData(data.data);
+    }
+
+    match /user_settings/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid) && validSettingsDocument(request.resource.data);
+      allow delete: if isOwner(uid);
+    }
+  }
+}

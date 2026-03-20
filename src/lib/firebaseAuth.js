@@ -8,6 +8,7 @@ import {
   signInWithPopup,
   signOut,
 } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
@@ -31,6 +32,7 @@ export const isFirebaseConfigured = firebaseConfigMissingKeys.length === 0;
 
 const firebaseApp = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 const auth = firebaseApp ? getAuth(firebaseApp) : null;
+export const firestoreDb = firebaseApp ? getFirestore(firebaseApp) : null;
 const googleProvider = auth ? new GoogleAuthProvider() : null;
 
 if (googleProvider) {

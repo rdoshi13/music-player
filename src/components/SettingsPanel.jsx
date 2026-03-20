@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-
-const PLAYER_SETTINGS_STORAGE_KEY = "playerSettings";
+import { useMemo, useRef, useState } from "react";
+import { useSettings } from "../context/useSettings";
+import { normalizePlayerSettings } from "../lib/settingsSchema";
 
 const SETTINGS_SECTIONS = [
   { key: "account", label: "Account" },
@@ -19,135 +19,69 @@ const EQUALIZER_PRESETS = {
   trebleBoost: { bass: -2, mid: 0, treble: 6 },
 };
 
-const DEFAULT_PLAYER_SETTINGS = {
-  crossfadeEnabled: false,
-  crossfadeSeconds: 4,
-  equalizerPreset: "flat",
-  equalizer: EQUALIZER_PRESETS.flat,
-  hotkeysEnabled: true,
-  spacebarPlayPauseEnabled: true,
-  arrowSeekEnabled: false,
-  gaplessPlaybackEnabled: false,
-  normalizeVolumeEnabled: false,
-  autoplayBehavior: "resume-last-session",
-  autoRescanOnLaunch: false,
-  duplicateHandling: "skip-duplicates",
-  folderSortMode: "recent-first",
-};
-
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-const normalizePlayerSettings = (rawSettings) => {
-  if (!rawSettings || typeof rawSettings !== "object") {
-    return DEFAULT_PLAYER_SETTINGS;
-  }
-
-  const parsedEqualizer =
-    rawSettings.equalizer && typeof rawSettings.equalizer === "object"
-      ? rawSettings.equalizer
-      : {};
-
-  return {
-    crossfadeEnabled: Boolean(rawSettings.crossfadeEnabled),
-    crossfadeSeconds: clamp(Number(rawSettings.crossfadeSeconds) || 4, 1, 12),
-    equalizerPreset:
-      typeof rawSettings.equalizerPreset === "string" ? rawSettings.equalizerPreset : "flat",
-    equalizer: {
-      bass: clamp(Number(parsedEqualizer.bass) || 0, -12, 12),
-      mid: clamp(Number(parsedEqualizer.mid) || 0, -12, 12),
-      treble: clamp(Number(parsedEqualizer.treble) || 0, -12, 12),
-    },
-    hotkeysEnabled:
-      rawSettings.hotkeysEnabled === undefined ? true : Boolean(rawSettings.hotkeysEnabled),
-    spacebarPlayPauseEnabled:
-      rawSettings.spacebarPlayPauseEnabled === undefined
-        ? true
-        : Boolean(rawSettings.spacebarPlayPauseEnabled),
-    arrowSeekEnabled: Boolean(rawSettings.arrowSeekEnabled),
-    gaplessPlaybackEnabled: Boolean(rawSettings.gaplessPlaybackEnabled),
-    normalizeVolumeEnabled: Boolean(rawSettings.normalizeVolumeEnabled),
-    autoplayBehavior:
-      typeof rawSettings.autoplayBehavior === "string"
-        ? rawSettings.autoplayBehavior
-        : "resume-last-session",
-    autoRescanOnLaunch: Boolean(rawSettings.autoRescanOnLaunch),
-    duplicateHandling:
-      typeof rawSettings.duplicateHandling === "string"
-        ? rawSettings.duplicateHandling
-        : "skip-duplicates",
-    folderSortMode:
-      typeof rawSettings.folderSortMode === "string"
-        ? rawSettings.folderSortMode
-        : "recent-first",
-  };
-};
-
-const getStoredPlayerSettings = () => {
-  const rawSettings = localStorage.getItem(PLAYER_SETTINGS_STORAGE_KEY);
-  if (!rawSettings) {
-    return DEFAULT_PLAYER_SETTINGS;
-  }
-
-  try {
-    const parsedSettings = JSON.parse(rawSettings);
-    return normalizePlayerSettings(parsedSettings);
-  } catch {
-    return DEFAULT_PLAYER_SETTINGS;
-  }
-};
-
-const SettingsPanel = ({
-  user,
-  isDarkMode,
-  onToggleDarkMode,
-  onBackToLibrary,
-  onSignOut,
-}) => {
+const SettingsPanel = ({ user, onBackToLibrary, onSignOut }) => {
+  const {
+    settings,
+    isSavingSettings,
+    settingsError,
+    updateSettings,
+    replaceSettings,
+    resetSettingsToDefaults,
+    clearSettingsError,
+  } = useSettings();
   const [activeSection, setActiveSection] = useState("account");
-  const [settings, setSettings] = useState(() => getStoredPlayerSettings());
   const [dataStatus, setDataStatus] = useState("");
   const importInputRef = useRef(null);
 
-  useEffect(() => {
-    localStorage.setItem(PLAYER_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-    window.dispatchEvent(
-      new CustomEvent("player:settings-updated", {
-        detail: settings,
-      })
-    );
-  }, [settings]);
+  const isDarkMode = settings.ui.theme === "dark";
 
-  const updateSettings = (partialSettings) => {
-    setSettings((previousSettings) => ({
-      ...previousSettings,
-      ...partialSettings,
-    }));
-  };
+  const activeSectionLabel = useMemo(
+    () => SETTINGS_SECTIONS.find((section) => section.key === activeSection)?.label || "",
+    [activeSection]
+  );
 
   const applyEqualizerPreset = (presetKey) => {
     const presetValues = EQUALIZER_PRESETS[presetKey] || EQUALIZER_PRESETS.flat;
-    updateSettings({
-      equalizerPreset: presetKey,
-      equalizer: presetValues,
-    });
+    updateSettings((previousSettings) => ({
+      ...previousSettings,
+      equalizer: {
+        ...previousSettings.equalizer,
+        preset: presetKey,
+        bass: presetValues.bass,
+        mid: presetValues.mid,
+        treble: presetValues.treble,
+      },
+    }));
   };
 
   const setEqualizerBand = (band, value) => {
-    setSettings((previousSettings) => ({
+    updateSettings((previousSettings) => ({
       ...previousSettings,
-      equalizerPreset: "custom",
       equalizer: {
         ...previousSettings.equalizer,
+        preset: "custom",
         [band]: clamp(Number(value) || 0, -12, 12),
       },
     }));
   };
 
   const exportSettings = () => {
+    let playlistThumbnails = null;
+    if (settings.data.includeThumbnailsInExport) {
+      try {
+        playlistThumbnails = JSON.parse(localStorage.getItem("playlistThumbnails") || "null");
+      } catch {
+        playlistThumbnails = null;
+      }
+    }
+
     const payload = {
       exportedAt: new Date().toISOString(),
       version: 1,
       settings,
+      playlistThumbnails,
     };
 
     const fileBlob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -173,9 +107,12 @@ const SettingsPanel = ({
     try {
       const fileText = await selectedFile.text();
       const parsedFile = JSON.parse(fileText);
-      const importedSettings = normalizePlayerSettings(parsedFile?.settings || parsedFile);
-      setSettings(importedSettings);
+      const importedSettings = normalizePlayerSettings(parsedFile?.settings || parsedFile, {
+        fallbackTheme: settings.ui.theme,
+      });
+      replaceSettings(importedSettings);
       setDataStatus("Imported settings successfully.");
+      clearSettingsError();
     } catch {
       setDataStatus("Could not import file. Use a valid settings JSON export.");
     } finally {
@@ -185,20 +122,10 @@ const SettingsPanel = ({
     }
   };
 
-  const resetSettings = () => {
-    setSettings(DEFAULT_PLAYER_SETTINGS);
-    setDataStatus("Reset settings to defaults.");
-  };
-
   const clearThumbnailCache = () => {
     localStorage.removeItem("playlistThumbnails");
     setDataStatus("Cleared playlist thumbnail cache.");
   };
-
-  const activeSectionLabel = useMemo(
-    () => SETTINGS_SECTIONS.find((section) => section.key === activeSection)?.label || "",
-    [activeSection]
-  );
 
   return (
     <section className="panel settings-panel" aria-label="Settings">
@@ -240,6 +167,13 @@ const SettingsPanel = ({
             <h4 className="panel-title">{activeSectionLabel}</h4>
           </div>
 
+          {(isSavingSettings || settingsError) && (
+            <div className="settings-stack">
+              {isSavingSettings && <p className="helper-text">Saving settings...</p>}
+              {settingsError && <p className="helper-text">{settingsError}</p>}
+            </div>
+          )}
+
           {activeSection === "account" && (
             <div className="settings-stack">
               <div className="settings-card">
@@ -263,7 +197,20 @@ const SettingsPanel = ({
                 <p className="settings-label">Appearance</p>
                 <div className="settings-row">
                   <span>{isDarkMode ? "Dark mode is enabled" : "Dark mode is disabled"}</span>
-                  <button type="button" className="btn btn-sm btn-ghost" onClick={onToggleDarkMode}>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => {
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        ui: {
+                          ...previousSettings.ui,
+                          theme: previousSettings.ui.theme === "dark" ? "light" : "dark",
+                        },
+                      }));
+                      clearSettingsError();
+                    }}
+                  >
                     Toggle Dark Mode
                   </button>
                 </div>
@@ -291,9 +238,15 @@ const SettingsPanel = ({
                   <span>Gapless playback (coming soon)</span>
                   <input
                     type="checkbox"
-                    checked={settings.gaplessPlaybackEnabled}
+                    checked={settings.playback.gaplessPlaybackEnabled}
                     onChange={(event) =>
-                      updateSettings({ gaplessPlaybackEnabled: event.target.checked })
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        playback: {
+                          ...previousSettings.playback,
+                          gaplessPlaybackEnabled: event.target.checked,
+                        },
+                      }))
                     }
                   />
                 </label>
@@ -301,9 +254,15 @@ const SettingsPanel = ({
                   <span>Volume normalization (coming soon)</span>
                   <input
                     type="checkbox"
-                    checked={settings.normalizeVolumeEnabled}
+                    checked={settings.playback.normalizeVolumeEnabled}
                     onChange={(event) =>
-                      updateSettings({ normalizeVolumeEnabled: event.target.checked })
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        playback: {
+                          ...previousSettings.playback,
+                          normalizeVolumeEnabled: event.target.checked,
+                        },
+                      }))
                     }
                   />
                 </label>
@@ -315,8 +274,16 @@ const SettingsPanel = ({
                 <select
                   id="autoplay-behavior"
                   className="select"
-                  value={settings.autoplayBehavior}
-                  onChange={(event) => updateSettings({ autoplayBehavior: event.target.value })}
+                  value={settings.playback.autoplayBehavior}
+                  onChange={(event) =>
+                    updateSettings((previousSettings) => ({
+                      ...previousSettings,
+                      playback: {
+                        ...previousSettings.playback,
+                        autoplayBehavior: event.target.value,
+                      },
+                    }))
+                  }
                 >
                   <option value="resume-last-session">Resume last session</option>
                   <option value="stay-paused">Stay paused on load</option>
@@ -333,16 +300,22 @@ const SettingsPanel = ({
                   <span>Enable crossfade between tracks</span>
                   <input
                     type="checkbox"
-                    checked={settings.crossfadeEnabled}
+                    checked={settings.crossfade.enabled}
                     onChange={(event) =>
-                      updateSettings({ crossfadeEnabled: event.target.checked })
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        crossfade: {
+                          ...previousSettings.crossfade,
+                          enabled: event.target.checked,
+                        },
+                      }))
                     }
                   />
                 </label>
               </div>
               <div className="settings-card">
                 <label className="settings-slider-label" htmlFor="crossfade-seconds">
-                  Crossfade Duration: {settings.crossfadeSeconds}s
+                  Crossfade Duration: {settings.crossfade.seconds}s
                 </label>
                 <input
                   id="crossfade-seconds"
@@ -351,10 +324,16 @@ const SettingsPanel = ({
                   min="1"
                   max="12"
                   step="1"
-                  value={settings.crossfadeSeconds}
-                  disabled={!settings.crossfadeEnabled}
+                  value={settings.crossfade.seconds}
+                  disabled={!settings.crossfade.enabled}
                   onChange={(event) =>
-                    updateSettings({ crossfadeSeconds: Number(event.target.value) || 4 })
+                    updateSettings((previousSettings) => ({
+                      ...previousSettings,
+                      crossfade: {
+                        ...previousSettings.crossfade,
+                        seconds: Number(event.target.value) || 4,
+                      },
+                    }))
                   }
                 />
                 <p className="helper-text">
@@ -373,7 +352,7 @@ const SettingsPanel = ({
                 <select
                   id="equalizer-preset"
                   className="select"
-                  value={settings.equalizerPreset}
+                  value={settings.equalizer.preset}
                   onChange={(event) => applyEqualizerPreset(event.target.value)}
                 >
                   <option value="flat">Flat</option>
@@ -436,9 +415,15 @@ const SettingsPanel = ({
                   <span>Enable keyboard shortcuts</span>
                   <input
                     type="checkbox"
-                    checked={settings.hotkeysEnabled}
+                    checked={settings.hotkeys.enabled}
                     onChange={(event) =>
-                      updateSettings({ hotkeysEnabled: event.target.checked })
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        hotkeys: {
+                          ...previousSettings.hotkeys,
+                          enabled: event.target.checked,
+                        },
+                      }))
                     }
                   />
                 </label>
@@ -446,12 +431,16 @@ const SettingsPanel = ({
                   <span>Spacebar toggles play/pause</span>
                   <input
                     type="checkbox"
-                    checked={settings.spacebarPlayPauseEnabled}
-                    disabled={!settings.hotkeysEnabled}
+                    checked={settings.hotkeys.spacebarPlayPauseEnabled}
+                    disabled={!settings.hotkeys.enabled}
                     onChange={(event) =>
-                      updateSettings({
-                        spacebarPlayPauseEnabled: event.target.checked,
-                      })
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        hotkeys: {
+                          ...previousSettings.hotkeys,
+                          spacebarPlayPauseEnabled: event.target.checked,
+                        },
+                      }))
                     }
                   />
                 </label>
@@ -459,12 +448,33 @@ const SettingsPanel = ({
                   <span>Arrow keys seek (coming soon)</span>
                   <input
                     type="checkbox"
-                    checked={settings.arrowSeekEnabled}
-                    disabled={!settings.hotkeysEnabled}
+                    checked={settings.hotkeys.arrowSeekEnabled}
+                    disabled={!settings.hotkeys.enabled}
                     onChange={(event) =>
-                      updateSettings({
-                        arrowSeekEnabled: event.target.checked,
-                      })
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        hotkeys: {
+                          ...previousSettings.hotkeys,
+                          arrowSeekEnabled: event.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                </label>
+                <label className="settings-row settings-toggle-row">
+                  <span>N/P keys for next/previous track</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.hotkeys.nextPreviousKeysEnabled}
+                    disabled={!settings.hotkeys.enabled}
+                    onChange={(event) =>
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        hotkeys: {
+                          ...previousSettings.hotkeys,
+                          nextPreviousKeysEnabled: event.target.checked,
+                        },
+                      }))
                     }
                   />
                 </label>
@@ -496,9 +506,15 @@ const SettingsPanel = ({
                   <span>Auto-rescan connected folders on launch</span>
                   <input
                     type="checkbox"
-                    checked={settings.autoRescanOnLaunch}
+                    checked={settings.library.autoRescanOnLaunch}
                     onChange={(event) =>
-                      updateSettings({ autoRescanOnLaunch: event.target.checked })
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        library: {
+                          ...previousSettings.library,
+                          autoRescanOnLaunch: event.target.checked,
+                        },
+                      }))
                     }
                   />
                 </label>
@@ -510,8 +526,16 @@ const SettingsPanel = ({
                 <select
                   id="duplicate-handling"
                   className="select"
-                  value={settings.duplicateHandling}
-                  onChange={(event) => updateSettings({ duplicateHandling: event.target.value })}
+                  value={settings.library.duplicateHandling}
+                  onChange={(event) =>
+                    updateSettings((previousSettings) => ({
+                      ...previousSettings,
+                      library: {
+                        ...previousSettings.library,
+                        duplicateHandling: event.target.value,
+                      },
+                    }))
+                  }
                 >
                   <option value="skip-duplicates">Skip duplicates</option>
                   <option value="keep-both">Keep both</option>
@@ -524,8 +548,16 @@ const SettingsPanel = ({
                 <select
                   id="folder-sort-mode"
                   className="select"
-                  value={settings.folderSortMode}
-                  onChange={(event) => updateSettings({ folderSortMode: event.target.value })}
+                  value={settings.library.folderSortMode}
+                  onChange={(event) =>
+                    updateSettings((previousSettings) => ({
+                      ...previousSettings,
+                      library: {
+                        ...previousSettings.library,
+                        folderSortMode: event.target.value,
+                      },
+                    }))
+                  }
                 >
                   <option value="recent-first">Most recent folder first</option>
                   <option value="alphabetical">Alphabetical</option>
@@ -537,6 +569,24 @@ const SettingsPanel = ({
 
           {activeSection === "data" && (
             <div className="settings-stack">
+              <div className="settings-card">
+                <label className="settings-row settings-toggle-row">
+                  <span>Include playlist thumbnails in export</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.data.includeThumbnailsInExport}
+                    onChange={(event) =>
+                      updateSettings((previousSettings) => ({
+                        ...previousSettings,
+                        data: {
+                          ...previousSettings.data,
+                          includeThumbnailsInExport: event.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                </label>
+              </div>
               <div className="settings-card settings-actions">
                 <p className="settings-label">Transfer & Backup</p>
                 <div className="settings-action-row">
@@ -562,7 +612,14 @@ const SettingsPanel = ({
               <div className="settings-card settings-actions">
                 <p className="settings-label">Maintenance</p>
                 <div className="settings-action-row">
-                  <button type="button" className="btn btn-sm btn-danger" onClick={resetSettings}>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    onClick={() => {
+                      resetSettingsToDefaults();
+                      setDataStatus("Reset settings to defaults.");
+                    }}
+                  >
                     Reset all settings
                   </button>
                   <button

@@ -5,8 +5,8 @@ import Player from "./components/Player";
 import Playlist from "./components/Playlist";
 import SettingsPanel from "./components/SettingsPanel";
 import { useAuth } from "./context/useAuth";
+import { useSettings } from "./context/useSettings";
 
-const UI_THEME_STORAGE_KEY = "uiTheme";
 const CENTER_VIEW_LIBRARY = "library";
 const CENTER_VIEW_SETTINGS = "settings";
 
@@ -20,18 +20,12 @@ function App() {
     isFirebaseConfigured,
     firebaseConfigMissingKeys,
   } = useAuth();
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const storedTheme = localStorage.getItem(UI_THEME_STORAGE_KEY);
-    return storedTheme === "dark";
-  });
+  const { settings, updateSettings } = useSettings();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [activeCenterView, setActiveCenterView] = useState(CENTER_VIEW_LIBRARY);
   const userMenuRef = useRef(null);
 
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", isDarkMode ? "dark" : "light");
-    localStorage.setItem(UI_THEME_STORAGE_KEY, isDarkMode ? "dark" : "light");
-  }, [isDarkMode]);
+  const isDarkMode = settings.ui.theme === "dark";
 
   useEffect(() => {
     const handleOutsideClick = (event) => {
@@ -158,7 +152,15 @@ function App() {
               <button
                 type="button"
                 className="auth-menu-btn"
-                onClick={() => setIsDarkMode((previous) => !previous)}
+                onClick={() =>
+                  updateSettings((previousSettings) => ({
+                    ...previousSettings,
+                    ui: {
+                      ...previousSettings.ui,
+                      theme: previousSettings.ui.theme === "dark" ? "light" : "dark",
+                    },
+                  }))
+                }
               >
                 {isDarkMode ? "Dark mode: On" : "Dark mode: Off"}
               </button>
@@ -193,8 +195,6 @@ function App() {
           {activeCenterView === CENTER_VIEW_SETTINGS ? (
             <SettingsPanel
               user={user}
-              isDarkMode={isDarkMode}
-              onToggleDarkMode={() => setIsDarkMode((previous) => !previous)}
               onBackToLibrary={() => setActiveCenterView(CENTER_VIEW_LIBRARY)}
               onSignOut={signOut}
             />

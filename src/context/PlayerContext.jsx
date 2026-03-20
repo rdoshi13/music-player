@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { PlayerContext } from "./AppPlayerContext";
+import { useSettings } from "./useSettings";
 import {
   loadFolderHandle,
   loadTrackHandle,
@@ -19,6 +20,7 @@ const PLAYLISTS_STORAGE_MAX_CHARS = 2_500_000;
 const PLAYLISTS_STORAGE_KEY = "playlists";
 const VOLUME_STORAGE_KEY = "playerVolume";
 const CURRENT_PLAYLIST_STORAGE_KEY = "currentPlaylist";
+const PLAYBACK_SESSION_STORAGE_KEY = "playbackSession";
 
 const REMOTE_TRACK_TYPE = "remote";
 const LOCAL_HANDLE_TRACK_TYPE = "local-handle";
@@ -181,6 +183,7 @@ const TRACK_ARTWORK_TIMEOUT_MS = 220;
 const BACKGROUND_THUMBNAIL_BATCH_SIZE = 35;
 
 export const PlayerProvider = ({ children }) => {
+  const { settings, isSettingsLoading } = useSettings();
   const [playlists, setPlaylists] = useState({
     [ALL_TRACKS_PLAYLIST]: [],
     [RECENT_SONGS_PLAYLIST]: [],
@@ -201,7 +204,16 @@ export const PlayerProvider = ({ children }) => {
   const localFileHandleCacheRef = useRef({});
   const musicFolderHandleRef = useRef(null);
   const playTrackRef = useRef(null);
+  const syncMusicFolderRef = useRef(null);
   const playTrackRequestIdRef = useRef(0);
+  const pendingPlaybackSessionRef = useRef(null);
+  const hasAppliedPlaybackStartupRef = useRef(false);
+  const hasAttemptedAutoRescanRef = useRef(false);
+
+  const playbackAutoplayBehavior = settings.playback.autoplayBehavior;
+  const autoRescanOnLaunch = settings.library.autoRescanOnLaunch;
+  const duplicateHandling = settings.library.duplicateHandling;
+  const folderSortMode = settings.library.folderSortMode;
 
   const createTrackId = () =>
     globalThis.crypto?.randomUUID?.() ??
@@ -640,7 +652,7 @@ export const PlayerProvider = ({ children }) => {
       const newTracks = folderTracks.filter((track) => {
         const key = `${track.folderHandleId || MUSIC_FOLDER_HANDLE_ID}:${track.relativePath}`;
         if (existingTrackKeys.has(key)) {
-          return false;
+          return duplicateHandling === "keep-both";
         }
         existingTrackKeys.add(key);
         return true;
@@ -652,9 +664,20 @@ export const PlayerProvider = ({ children }) => {
         return previousPlaylists;
       }
 
+      let nextPlaylistTracks = [...mergedTracks, ...newTracks];
+      if (folderSortMode === "recent-first") {
+        nextPlaylistTracks = [...newTracks, ...mergedTracks];
+      } else if (folderSortMode === "alphabetical") {
+        nextPlaylistTracks = [...nextPlaylistTracks].sort((left, right) =>
+          (left?.title || "").localeCompare(right?.title || "", undefined, {
+            sensitivity: "base",
+          })
+        );
+      }
+
       return {
         ...previousPlaylists,
-        [playlistName]: [...mergedTracks, ...newTracks],
+        [playlistName]: nextPlaylistTracks,
       };
     });
 
@@ -732,6 +755,25 @@ export const PlayerProvider = ({ children }) => {
         .catch(() => {
           setHasConnectedMusicFolder(false);
         });
+    }
+
+    const storedPlaybackSession = localStorage.getItem(PLAYBACK_SESSION_STORAGE_KEY);
+    if (storedPlaybackSession) {
+      try {
+        const parsedPlaybackSession = JSON.parse(storedPlaybackSession);
+        if (
+          parsedPlaybackSession &&
+          typeof parsedPlaybackSession.playlistName === "string" &&
+          Number.isInteger(parsedPlaybackSession.trackIndex)
+        ) {
+          pendingPlaybackSessionRef.current = {
+            playlistName: parsedPlaybackSession.playlistName,
+            trackIndex: Math.max(0, parsedPlaybackSession.trackIndex),
+          };
+        }
+      } catch {
+        pendingPlaybackSessionRef.current = null;
+      }
     }
 
     setIsHydrated(true);
@@ -815,6 +857,25 @@ export const PlayerProvider = ({ children }) => {
   }, [currentPlaylist, isHydrated, playlists]);
 
   useEffect(() => {
+    if (!isHydrated || !nowPlayingTrack) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(
+        PLAYBACK_SESSION_STORAGE_KEY,
+        JSON.stringify({
+          playlistName: playbackPlaylist,
+          trackIndex: currentTrackIndex,
+          updatedAtMs: Date.now(),
+        })
+      );
+    } catch {
+      // Playback should keep working even if session persistence fails.
+    }
+  }, [currentTrackIndex, isHydrated, nowPlayingTrack, playbackPlaylist]);
+
+  useEffect(() => {
     audioRef.current.volume = volume;
     localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
   }, [volume]);
@@ -830,6 +891,77 @@ export const PlayerProvider = ({ children }) => {
     },
     []
   );
+
+  useEffect(() => {
+    if (!isHydrated || isSettingsLoading) {
+      return;
+    }
+
+    if (hasAppliedPlaybackStartupRef.current) {
+      return;
+    }
+
+    hasAppliedPlaybackStartupRef.current = true;
+
+    const playbackSession = pendingPlaybackSessionRef.current;
+    if (
+      !playbackSession ||
+      playbackAutoplayBehavior === "stay-paused" ||
+      !playlists[playbackSession.playlistName]
+    ) {
+      return;
+    }
+
+    const targetPlaylist = playlists[playbackSession.playlistName] || [];
+    if (targetPlaylist.length === 0) {
+      return;
+    }
+
+    const restoredIndex = Math.min(
+      Math.max(0, playbackSession.trackIndex),
+      targetPlaylist.length - 1
+    );
+    const restoredTrack = targetPlaylist[restoredIndex];
+    if (!restoredTrack) {
+      return;
+    }
+
+    setCurrentPlaylistState(playbackSession.playlistName);
+    setPlaybackPlaylist(playbackSession.playlistName);
+    setCurrentTrackIndex(restoredIndex);
+    setNowPlayingTrack(restoredTrack);
+
+    if (playbackAutoplayBehavior === "play-immediately" && playTrackRef.current) {
+      void playTrackRef.current(restoredIndex, playbackSession.playlistName);
+    }
+  }, [isHydrated, isSettingsLoading, playbackAutoplayBehavior, playlists]);
+
+  useEffect(() => {
+    if (
+      !isHydrated ||
+      isSettingsLoading ||
+      !supportsPersistentLocalFiles ||
+      !hasConnectedMusicFolder ||
+      !autoRescanOnLaunch
+    ) {
+      return;
+    }
+
+    if (hasAttemptedAutoRescanRef.current) {
+      return;
+    }
+
+    hasAttemptedAutoRescanRef.current = true;
+    if (syncMusicFolderRef.current) {
+      void syncMusicFolderRef.current(ALL_TRACKS_PLAYLIST);
+    }
+  }, [
+    autoRescanOnLaunch,
+    hasConnectedMusicFolder,
+    isHydrated,
+    isSettingsLoading,
+    supportsPersistentLocalFiles,
+  ]);
 
   const stopPlayback = () => {
     audioRef.current.pause();
@@ -1134,6 +1266,8 @@ export const PlayerProvider = ({ children }) => {
       };
     }
   };
+
+  syncMusicFolderRef.current = syncMusicFolder;
 
   const removeAllSyncedTracks = (playlistName = currentPlaylist) => {
     const tracks = playlists[playlistName] || [];
