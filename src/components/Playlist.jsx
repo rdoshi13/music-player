@@ -6,7 +6,6 @@ const VIEW_PLAYLISTS = "playlists";
 const PLAYLIST_THUMBNAILS_STORAGE_KEY = "playlistThumbnails";
 const THUMBNAIL_MAX_SIDE_PX = 240;
 const THUMBNAIL_JPEG_QUALITY = 0.78;
-const FOLDER_ACTION_TIMEOUT_MS = 20000;
 
 const MusicNoteIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -82,17 +81,6 @@ const createOptimizedThumbnailDataUrl = async (file) => {
   context.drawImage(image, 0, 0, width, height);
   return canvas.toDataURL("image/jpeg", THUMBNAIL_JPEG_QUALITY);
 };
-
-const withActionTimeout = (promise, timeoutMs, timeoutMessage) =>
-  Promise.race([
-    promise,
-    new Promise((resolve) => {
-      window.setTimeout(
-        () => resolve({ success: false, addedCount: 0, message: timeoutMessage }),
-        timeoutMs
-      );
-    }),
-  ]);
 
 const Playlist = () => {
   const {
@@ -298,11 +286,7 @@ const Playlist = () => {
     setIsSyncingMusicFolder(true);
     setLocalImportStatus("");
     try {
-      const result = await withActionTimeout(
-        connectMusicFolder(allTracksPlaylistName),
-        FOLDER_ACTION_TIMEOUT_MS,
-        "Folder import is taking too long. Try a smaller folder or sync again."
-      );
+      const result = await connectMusicFolder(allTracksPlaylistName);
       setLocalImportStatus(result?.message || "Could not connect the folder.");
     } catch {
       setLocalImportStatus("Could not connect the folder. Please try again.");
@@ -315,11 +299,7 @@ const Playlist = () => {
     setIsSyncingMusicFolder(true);
     setLocalImportStatus("");
     try {
-      const result = await withActionTimeout(
-        syncMusicFolder(allTracksPlaylistName),
-        FOLDER_ACTION_TIMEOUT_MS,
-        "Folder sync is taking too long. Try syncing again."
-      );
+      const result = await syncMusicFolder(allTracksPlaylistName);
       setLocalImportStatus(result?.message || "Could not sync folder tracks.");
     } catch {
       setLocalImportStatus("Could not sync folder tracks. Please reconnect and try again.");

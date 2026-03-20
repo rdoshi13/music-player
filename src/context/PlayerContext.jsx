@@ -181,6 +181,7 @@ const withTimeout = async (
 
 const TRACK_ARTWORK_TIMEOUT_MS = 220;
 const BACKGROUND_THUMBNAIL_BATCH_SIZE = 35;
+const PLAYBACK_START_TIMEOUT_MS = 2000;
 
 export const PlayerProvider = ({ children }) => {
   const { settings, isSettingsLoading } = useSettings();
@@ -484,7 +485,6 @@ export const PlayerProvider = ({ children }) => {
     sourceFolderName = ""
   ) => {
     const tracks = [];
-
     for await (const [entryName, entryHandle] of directoryHandle.entries()) {
       const nextPath = pathPrefix ? `${pathPrefix}/${entryName}` : entryName;
 
@@ -1032,23 +1032,32 @@ export const PlayerProvider = ({ children }) => {
       return;
     }
 
-    setCurrentTrackIndex(index);
-    setPlaybackPlaylist(playlistName);
-    setNowPlayingTrack(nextTrack);
-
     const startPlayback = async (url) => {
       audioRef.current.src = url;
       audioRef.current.currentTime = 0;
+      try {
+        audioRef.current.load();
+      } catch {
+        // Ignore load failures and still attempt play.
+      }
       const playPromise = audioRef.current.play();
       if (playPromise?.catch) {
         try {
-          await playPromise;
-          return true;
+          await Promise.race([
+            playPromise,
+            new Promise((_, reject) => {
+              window.setTimeout(
+                () => reject(new Error("Playback start timeout.")),
+                PLAYBACK_START_TIMEOUT_MS
+              );
+            }),
+          ]);
+          return !audioRef.current.paused;
         } catch {
           return false;
         }
       }
-      return true;
+      return !audioRef.current.paused;
     };
 
     let started = await startPlayback(playableUrl);
@@ -1072,6 +1081,9 @@ export const PlayerProvider = ({ children }) => {
       return;
     }
 
+    setCurrentTrackIndex(index);
+    setPlaybackPlaylist(playlistName);
+    setNowPlayingTrack(nextTrack);
     updateRecentSongs(nextTrack);
   };
 
