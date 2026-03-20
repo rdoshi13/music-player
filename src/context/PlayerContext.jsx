@@ -10,6 +10,7 @@ import {
   supportsFileSystemAccess,
 } from "../utils/localTrackStore";
 import { extractEmbeddedArtworkDataUrl } from "../utils/trackArtwork";
+import { getPlaybackTransitionPolicy } from "../lib/playbackTransition";
 
 const ALL_TRACKS_PLAYLIST = "recent";
 const RECENT_SONGS_PLAYLIST = "__recent_songs__";
@@ -231,6 +232,7 @@ export const PlayerProvider = ({ children }) => {
   const autoRescanOnLaunch = settings.library.autoRescanOnLaunch;
   const duplicateHandling = settings.library.duplicateHandling;
   const folderSortMode = settings.library.folderSortMode;
+  const isGaplessEnabled = Boolean(settings.playback.gaplessPlaybackEnabled);
   const isCrossfadeEnabled = Boolean(settings.crossfade.enabled);
   const crossfadeSeconds = Math.max(
     CROSSFADE_MIN_SECONDS,
@@ -1518,11 +1520,16 @@ export const PlayerProvider = ({ children }) => {
       }
     };
     const handleTimeUpdate = () => {
-      if (
-        !isCrossfadeEnabled ||
-        crossfadeTransitionActiveRef.current ||
-        !isPlaying
-      ) {
+      if (crossfadeTransitionActiveRef.current || !isPlaying) {
+        return;
+      }
+
+      const transitionPolicy = getPlaybackTransitionPolicy({
+        crossfadeEnabled: isCrossfadeEnabled,
+        crossfadeSeconds,
+        gaplessEnabled: isGaplessEnabled,
+      });
+      if (transitionPolicy.mode === "none") {
         return;
       }
 
@@ -1539,7 +1546,7 @@ export const PlayerProvider = ({ children }) => {
       }
 
       const remainingSeconds = duration - currentTime;
-      if (remainingSeconds > crossfadeSeconds) {
+      if (remainingSeconds > transitionPolicy.leadSeconds) {
         return;
       }
 
@@ -1551,7 +1558,7 @@ export const PlayerProvider = ({ children }) => {
 
       if (playTrackRef.current) {
         void playTrackRef.current(nextIndex, playbackPlaylist, {
-          disableCrossfade: false,
+          disableCrossfade: transitionPolicy.disableCrossfadeOnTrigger,
         });
       }
     };
@@ -1580,6 +1587,7 @@ export const PlayerProvider = ({ children }) => {
   }, [
     crossfadeSeconds,
     currentTrackIndex,
+    isGaplessEnabled,
     isCrossfadeEnabled,
     isPlaying,
     playbackPlaylist,

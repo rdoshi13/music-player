@@ -235,7 +235,7 @@ const SettingsPanel = ({ user, onBackToLibrary, onSignOut }) => {
             <div className="settings-stack">
               <div className="settings-card">
                 <label className="settings-row settings-toggle-row">
-                  <span>Gapless playback (coming soon)</span>
+                  <span>Gapless playback</span>
                   <input
                     type="checkbox"
                     checked={settings.playback.gaplessPlaybackEnabled}
@@ -250,6 +250,9 @@ const SettingsPanel = ({ user, onBackToLibrary, onSignOut }) => {
                     }
                   />
                 </label>
+                <p className="helper-text">
+                  Gapless removes transition gaps between tracks. If crossfade is enabled, crossfade takes priority.
+                </p>
                 <label className="settings-row settings-toggle-row">
                   <span>Volume normalization (coming soon)</span>
                   <input
