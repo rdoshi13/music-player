@@ -178,6 +178,7 @@ const withTimeout = async (
   ]);
 
 const TRACK_ARTWORK_TIMEOUT_MS = 220;
+const BACKGROUND_THUMBNAIL_BATCH_SIZE = 35;
 
 export const PlayerProvider = ({ children }) => {
   const [playlists, setPlaylists] = useState({
@@ -486,12 +487,6 @@ export const PlayerProvider = ({ children }) => {
       }
 
       if (entryHandle.kind === "file" && isAudioFileName(entryName)) {
-        const file = await entryHandle.getFile();
-        const trackThumbnail = await withTimeout(
-          extractEmbeddedArtworkDataUrl(file),
-          TRACK_ARTWORK_TIMEOUT_MS,
-          ""
-        );
         tracks.push({
           sourceType: LOCAL_FOLDER_TRACK_TYPE,
           title: entryName,
@@ -499,12 +494,87 @@ export const PlayerProvider = ({ children }) => {
           relativePath: nextPath,
           folderHandleId: MUSIC_FOLDER_HANDLE_ID,
           sourceFolderName,
-          trackThumbnail,
+          trackThumbnail: "",
         });
       }
     }
 
     return tracks;
+  };
+
+  const hydrateFolderTrackThumbnailsInBackground = async (
+    folderHandle,
+    playlistName,
+    tracksToHydrate
+  ) => {
+    if (!folderHandle || !Array.isArray(tracksToHydrate) || tracksToHydrate.length === 0) {
+      return;
+    }
+
+    const thumbnailByKey = new Map();
+    for (const track of tracksToHydrate) {
+      if (!isLocalFolderTrack(track) || !track.relativePath) {
+        continue;
+      }
+
+      try {
+        const fileHandle = await resolvePathFromFolder(folderHandle, track.relativePath);
+        if (!fileHandle) {
+          continue;
+        }
+
+        const file = await fileHandle.getFile();
+        const thumbnail = await withTimeout(
+          extractEmbeddedArtworkDataUrl(file),
+          TRACK_ARTWORK_TIMEOUT_MS,
+          ""
+        );
+        if (!thumbnail) {
+          continue;
+        }
+
+        const key = `${track.folderHandleId || MUSIC_FOLDER_HANDLE_ID}:${track.relativePath}`;
+        thumbnailByKey.set(key, thumbnail);
+      } catch {
+        // Keep folder sync resilient even when thumbnail extraction fails.
+      }
+    }
+
+    if (thumbnailByKey.size === 0) {
+      return;
+    }
+
+    setPlaylists((previousPlaylists) => {
+      const playlistTracks = previousPlaylists[playlistName] || [];
+      let updated = false;
+
+      const nextTracks = playlistTracks.map((track) => {
+        if (!isLocalFolderTrack(track) || track.trackThumbnail) {
+          return track;
+        }
+
+        const key = `${track.folderHandleId || MUSIC_FOLDER_HANDLE_ID}:${track.relativePath}`;
+        const thumbnail = thumbnailByKey.get(key);
+        if (!thumbnail) {
+          return track;
+        }
+
+        updated = true;
+        return {
+          ...track,
+          trackThumbnail: thumbnail,
+        };
+      });
+
+      if (!updated) {
+        return previousPlaylists;
+      }
+
+      return {
+        ...previousPlaylists,
+        [playlistName]: nextTracks,
+      };
+    });
   };
 
   const importTracksFromMusicFolder = async (
@@ -587,6 +657,14 @@ export const PlayerProvider = ({ children }) => {
         [playlistName]: [...mergedTracks, ...newTracks],
       };
     });
+
+    const thumbnailHydrationTracks = folderTracks
+      .slice(0, BACKGROUND_THUMBNAIL_BATCH_SIZE);
+    void hydrateFolderTrackThumbnailsInBackground(
+      folderHandle,
+      playlistName,
+      thumbnailHydrationTracks
+    );
 
     return addedCount;
   };

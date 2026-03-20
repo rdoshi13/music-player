@@ -17,6 +17,12 @@
   animation: reveal-up 420ms ease both;
 }
 
+.hero-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.9rem;
+}
+
 .hero-kicker {
   color: var(--ink-700);
   text-transform: uppercase;
@@ -35,6 +41,72 @@
 .hero-subtitle {
   color: var(--ink-700);
   max-width: 58ch;
+}
+
+.auth-panel {
+  display: grid;
+  gap: 0.6rem;
+  max-width: 680px;
+}
+
+.auth-missing-keys {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0.55rem 0.65rem;
+  font-size: 0.84rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.auth-user-chip {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.5rem;
+  min-width: 0;
+}
+
+.auth-avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.auth-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.auth-user-meta {
+  min-width: 0;
+}
+
+.auth-user-name,
+.auth-user-email {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auth-user-name {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.auth-user-email {
+  font-size: 0.76rem;
+  color: var(--ink-700);
 }
 
 .app-grid {
@@ -933,6 +1005,15 @@
 }
 
 @media (max-width: 620px) {
+  .hero-row {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-user-chip {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .panel-head-row {
     align-items: flex-start;
   }
