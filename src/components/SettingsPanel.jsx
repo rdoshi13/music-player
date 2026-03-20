@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const PLAYER_SETTINGS_STORAGE_KEY = "playerSettings";
 
 const SETTINGS_SECTIONS = [
   { key: "account", label: "Account" },
+  { key: "playback", label: "Playback" },
   { key: "crossfade", label: "Crossfade" },
   { key: "equalizer", label: "Equalizer" },
   { key: "hotkeys", label: "Hotkeys" },
+  { key: "library", label: "Library" },
+  { key: "data", label: "Data" },
 ];
 
 const EQUALIZER_PRESETS = {
@@ -24,9 +27,60 @@ const DEFAULT_PLAYER_SETTINGS = {
   hotkeysEnabled: true,
   spacebarPlayPauseEnabled: true,
   arrowSeekEnabled: false,
+  gaplessPlaybackEnabled: false,
+  normalizeVolumeEnabled: false,
+  autoplayBehavior: "resume-last-session",
+  autoRescanOnLaunch: false,
+  duplicateHandling: "skip-duplicates",
+  folderSortMode: "recent-first",
 };
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const normalizePlayerSettings = (rawSettings) => {
+  if (!rawSettings || typeof rawSettings !== "object") {
+    return DEFAULT_PLAYER_SETTINGS;
+  }
+
+  const parsedEqualizer =
+    rawSettings.equalizer && typeof rawSettings.equalizer === "object"
+      ? rawSettings.equalizer
+      : {};
+
+  return {
+    crossfadeEnabled: Boolean(rawSettings.crossfadeEnabled),
+    crossfadeSeconds: clamp(Number(rawSettings.crossfadeSeconds) || 4, 1, 12),
+    equalizerPreset:
+      typeof rawSettings.equalizerPreset === "string" ? rawSettings.equalizerPreset : "flat",
+    equalizer: {
+      bass: clamp(Number(parsedEqualizer.bass) || 0, -12, 12),
+      mid: clamp(Number(parsedEqualizer.mid) || 0, -12, 12),
+      treble: clamp(Number(parsedEqualizer.treble) || 0, -12, 12),
+    },
+    hotkeysEnabled:
+      rawSettings.hotkeysEnabled === undefined ? true : Boolean(rawSettings.hotkeysEnabled),
+    spacebarPlayPauseEnabled:
+      rawSettings.spacebarPlayPauseEnabled === undefined
+        ? true
+        : Boolean(rawSettings.spacebarPlayPauseEnabled),
+    arrowSeekEnabled: Boolean(rawSettings.arrowSeekEnabled),
+    gaplessPlaybackEnabled: Boolean(rawSettings.gaplessPlaybackEnabled),
+    normalizeVolumeEnabled: Boolean(rawSettings.normalizeVolumeEnabled),
+    autoplayBehavior:
+      typeof rawSettings.autoplayBehavior === "string"
+        ? rawSettings.autoplayBehavior
+        : "resume-last-session",
+    autoRescanOnLaunch: Boolean(rawSettings.autoRescanOnLaunch),
+    duplicateHandling:
+      typeof rawSettings.duplicateHandling === "string"
+        ? rawSettings.duplicateHandling
+        : "skip-duplicates",
+    folderSortMode:
+      typeof rawSettings.folderSortMode === "string"
+        ? rawSettings.folderSortMode
+        : "recent-first",
+  };
+};
 
 const getStoredPlayerSettings = () => {
   const rawSettings = localStorage.getItem(PLAYER_SETTINGS_STORAGE_KEY);
@@ -36,37 +90,7 @@ const getStoredPlayerSettings = () => {
 
   try {
     const parsedSettings = JSON.parse(rawSettings);
-    if (!parsedSettings || typeof parsedSettings !== "object") {
-      return DEFAULT_PLAYER_SETTINGS;
-    }
-
-    const parsedEqualizer =
-      parsedSettings.equalizer && typeof parsedSettings.equalizer === "object"
-        ? parsedSettings.equalizer
-        : {};
-
-    return {
-      crossfadeEnabled: Boolean(parsedSettings.crossfadeEnabled),
-      crossfadeSeconds: clamp(Number(parsedSettings.crossfadeSeconds) || 4, 1, 12),
-      equalizerPreset:
-        typeof parsedSettings.equalizerPreset === "string"
-          ? parsedSettings.equalizerPreset
-          : "flat",
-      equalizer: {
-        bass: clamp(Number(parsedEqualizer.bass) || 0, -12, 12),
-        mid: clamp(Number(parsedEqualizer.mid) || 0, -12, 12),
-        treble: clamp(Number(parsedEqualizer.treble) || 0, -12, 12),
-      },
-      hotkeysEnabled:
-        parsedSettings.hotkeysEnabled === undefined
-          ? true
-          : Boolean(parsedSettings.hotkeysEnabled),
-      spacebarPlayPauseEnabled:
-        parsedSettings.spacebarPlayPauseEnabled === undefined
-          ? true
-          : Boolean(parsedSettings.spacebarPlayPauseEnabled),
-      arrowSeekEnabled: Boolean(parsedSettings.arrowSeekEnabled),
-    };
+    return normalizePlayerSettings(parsedSettings);
   } catch {
     return DEFAULT_PLAYER_SETTINGS;
   }
@@ -81,6 +105,8 @@ const SettingsPanel = ({
 }) => {
   const [activeSection, setActiveSection] = useState("account");
   const [settings, setSettings] = useState(() => getStoredPlayerSettings());
+  const [dataStatus, setDataStatus] = useState("");
+  const importInputRef = useRef(null);
 
   useEffect(() => {
     localStorage.setItem(PLAYER_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
@@ -115,6 +141,58 @@ const SettingsPanel = ({
         [band]: clamp(Number(value) || 0, -12, 12),
       },
     }));
+  };
+
+  const exportSettings = () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      version: 1,
+      settings,
+    };
+
+    const fileBlob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const objectUrl = URL.createObjectURL(fileBlob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = "music-player-settings.json";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(objectUrl);
+    setDataStatus("Exported settings JSON.");
+  };
+
+  const handleSettingsImport = async (event) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) {
+      return;
+    }
+
+    try {
+      const fileText = await selectedFile.text();
+      const parsedFile = JSON.parse(fileText);
+      const importedSettings = normalizePlayerSettings(parsedFile?.settings || parsedFile);
+      setSettings(importedSettings);
+      setDataStatus("Imported settings successfully.");
+    } catch {
+      setDataStatus("Could not import file. Use a valid settings JSON export.");
+    } finally {
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
+  };
+
+  const resetSettings = () => {
+    setSettings(DEFAULT_PLAYER_SETTINGS);
+    setDataStatus("Reset settings to defaults.");
+  };
+
+  const clearThumbnailCache = () => {
+    localStorage.removeItem("playlistThumbnails");
+    setDataStatus("Cleared playlist thumbnail cache.");
   };
 
   const activeSectionLabel = useMemo(
@@ -202,6 +280,48 @@ const SettingsPanel = ({
                 >
                   Sign Out
                 </button>
+              </div>
+            </div>
+          )}
+
+          {activeSection === "playback" && (
+            <div className="settings-stack">
+              <div className="settings-card">
+                <label className="settings-row settings-toggle-row">
+                  <span>Gapless playback (coming soon)</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.gaplessPlaybackEnabled}
+                    onChange={(event) =>
+                      updateSettings({ gaplessPlaybackEnabled: event.target.checked })
+                    }
+                  />
+                </label>
+                <label className="settings-row settings-toggle-row">
+                  <span>Volume normalization (coming soon)</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.normalizeVolumeEnabled}
+                    onChange={(event) =>
+                      updateSettings({ normalizeVolumeEnabled: event.target.checked })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="settings-card">
+                <label className="settings-label" htmlFor="autoplay-behavior">
+                  Autoplay behavior
+                </label>
+                <select
+                  id="autoplay-behavior"
+                  className="select"
+                  value={settings.autoplayBehavior}
+                  onChange={(event) => updateSettings({ autoplayBehavior: event.target.value })}
+                >
+                  <option value="resume-last-session">Resume last session</option>
+                  <option value="stay-paused">Stay paused on load</option>
+                  <option value="play-immediately">Autoplay immediately</option>
+                </select>
               </div>
             </div>
           )}
@@ -366,6 +486,95 @@ const SettingsPanel = ({
                   </li>
                 </ul>
               </div>
+            </div>
+          )}
+
+          {activeSection === "library" && (
+            <div className="settings-stack">
+              <div className="settings-card">
+                <label className="settings-row settings-toggle-row">
+                  <span>Auto-rescan connected folders on launch</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.autoRescanOnLaunch}
+                    onChange={(event) =>
+                      updateSettings({ autoRescanOnLaunch: event.target.checked })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="settings-card">
+                <label className="settings-label" htmlFor="duplicate-handling">
+                  Duplicate handling
+                </label>
+                <select
+                  id="duplicate-handling"
+                  className="select"
+                  value={settings.duplicateHandling}
+                  onChange={(event) => updateSettings({ duplicateHandling: event.target.value })}
+                >
+                  <option value="skip-duplicates">Skip duplicates</option>
+                  <option value="keep-both">Keep both</option>
+                  <option value="replace-existing">Replace existing entry</option>
+                </select>
+
+                <label className="settings-label" htmlFor="folder-sort-mode">
+                  Folder priority/sort mode
+                </label>
+                <select
+                  id="folder-sort-mode"
+                  className="select"
+                  value={settings.folderSortMode}
+                  onChange={(event) => updateSettings({ folderSortMode: event.target.value })}
+                >
+                  <option value="recent-first">Most recent folder first</option>
+                  <option value="alphabetical">Alphabetical</option>
+                  <option value="manual-order">Manual order (coming soon)</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {activeSection === "data" && (
+            <div className="settings-stack">
+              <div className="settings-card settings-actions">
+                <p className="settings-label">Transfer & Backup</p>
+                <div className="settings-action-row">
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={exportSettings}>
+                    Export settings JSON
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => importInputRef.current?.click()}
+                  >
+                    Import settings JSON
+                  </button>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept="application/json"
+                    className="visually-hidden"
+                    onChange={handleSettingsImport}
+                  />
+                </div>
+              </div>
+              <div className="settings-card settings-actions">
+                <p className="settings-label">Maintenance</p>
+                <div className="settings-action-row">
+                  <button type="button" className="btn btn-sm btn-danger" onClick={resetSettings}>
+                    Reset all settings
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={clearThumbnailCache}
+                  >
+                    Clear thumbnail cache
+                  </button>
+                </div>
+              </div>
+              {dataStatus && <p className="helper-text">{dataStatus}</p>}
             </div>
           )}
         </div>

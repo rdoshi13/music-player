@@ -11,9 +11,6 @@ Current behavior:
 To do:
 
 - Add queue.
-- Add settings
-- Add equalizer in settings
-- Add crossplay in settings
 - Add more hotkeys in settings
 - Add visualizer
 - Fix mobile UI

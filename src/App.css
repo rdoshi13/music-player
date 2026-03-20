@@ -349,6 +349,16 @@
   text-align: center;
 }
 
+.settings-actions {
+  gap: 0.45rem;
+}
+
+.settings-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .left-column .panel:nth-child(2) {
   animation-delay: 70ms;
 }
