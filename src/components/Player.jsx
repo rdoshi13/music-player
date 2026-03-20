@@ -1,6 +1,38 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { PlayerContext } from "../context/AppPlayerContext";
 
+const PLAYER_SETTINGS_STORAGE_KEY = "playerSettings";
+const DEFAULT_HOTKEY_SETTINGS = {
+  hotkeysEnabled: true,
+  spacebarPlayPauseEnabled: true,
+};
+
+const getHotkeySettings = () => {
+  const storedSettings = localStorage.getItem(PLAYER_SETTINGS_STORAGE_KEY);
+  if (!storedSettings) {
+    return DEFAULT_HOTKEY_SETTINGS;
+  }
+
+  try {
+    const parsedSettings = JSON.parse(storedSettings);
+    if (!parsedSettings || typeof parsedSettings !== "object") {
+      return DEFAULT_HOTKEY_SETTINGS;
+    }
+    return {
+      hotkeysEnabled:
+        parsedSettings.hotkeysEnabled === undefined
+          ? true
+          : Boolean(parsedSettings.hotkeysEnabled),
+      spacebarPlayPauseEnabled:
+        parsedSettings.spacebarPlayPauseEnabled === undefined
+          ? true
+          : Boolean(parsedSettings.spacebarPlayPauseEnabled),
+    };
+  } catch {
+    return DEFAULT_HOTKEY_SETTINGS;
+  }
+};
+
 const formatTime = (seconds) => {
   if (!Number.isFinite(seconds) || seconds < 0) {
     return "0:00";
@@ -88,6 +120,7 @@ const Player = () => {
   const [playlistActionStatus, setPlaylistActionStatus] = useState("");
   const [hasBrokenNowPlayingThumbnail, setHasBrokenNowPlayingThumbnail] =
     useState(false);
+  const [hotkeySettings, setHotkeySettings] = useState(() => getHotkeySettings());
   const volumePopoverRef = useRef(null);
   const sleepPopoverRef = useRef(null);
   const addToPlaylistPopoverRef = useRef(null);
@@ -190,6 +223,40 @@ const Player = () => {
   }, []);
 
   useEffect(() => {
+    const handleSettingsUpdated = (event) => {
+      const nextSettings = event?.detail;
+      if (!nextSettings || typeof nextSettings !== "object") {
+        setHotkeySettings(getHotkeySettings());
+        return;
+      }
+
+      setHotkeySettings({
+        hotkeysEnabled:
+          nextSettings.hotkeysEnabled === undefined
+            ? true
+            : Boolean(nextSettings.hotkeysEnabled),
+        spacebarPlayPauseEnabled:
+          nextSettings.spacebarPlayPauseEnabled === undefined
+            ? true
+            : Boolean(nextSettings.spacebarPlayPauseEnabled),
+      });
+    };
+
+    const handleStorageChange = (event) => {
+      if (event.key === PLAYER_SETTINGS_STORAGE_KEY) {
+        setHotkeySettings(getHotkeySettings());
+      }
+    };
+
+    window.addEventListener("player:settings-updated", handleSettingsUpdated);
+    window.addEventListener("storage", handleStorageChange);
+    return () => {
+      window.removeEventListener("player:settings-updated", handleSettingsUpdated);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, []);
+
+  useEffect(() => {
     const isTypingTarget = (target) => {
       if (!(target instanceof HTMLElement)) {
         return false;
@@ -208,12 +275,6 @@ const Player = () => {
     };
 
     const handleGlobalKeyDown = (event) => {
-      const isSpaceKey =
-        event.code === "Space" || event.key === " " || event.key === "Spacebar";
-      if (!isSpaceKey) {
-        return;
-      }
-
       if (event.altKey || event.ctrlKey || event.metaKey) {
         return;
       }
@@ -222,33 +283,71 @@ const Player = () => {
         return;
       }
 
-      event.preventDefault();
+      if (!hotkeySettings.hotkeysEnabled) {
+        return;
+      }
+
+      const pressedKey = String(event.key || "").toLowerCase();
+      const isSpaceKey =
+        event.code === "Space" || event.key === " " || event.key === "Spacebar";
+
+      if (isSpaceKey && hotkeySettings.spacebarPlayPauseEnabled) {
+        event.preventDefault();
+
+        if (!hasPlaybackQueue) {
+          return;
+        }
+
+        if (!audioRef.current.src) {
+          void playTrack(currentTrackIndex, playbackPlaylist);
+          return;
+        }
+
+        if (audioRef.current.paused) {
+          const playPromise = audioRef.current.play();
+          if (playPromise?.catch) {
+            playPromise.catch(() => undefined);
+          }
+          return;
+        }
+
+        audioRef.current.pause();
+        return;
+      }
 
       if (!hasPlaybackQueue) {
         return;
       }
 
-      if (!audioRef.current.src) {
-        void playTrack(currentTrackIndex, playbackPlaylist);
+      if (pressedKey === "n") {
+        event.preventDefault();
+        const nextIndex = (currentTrackIndex + 1 + playbackQueue.length) % playbackQueue.length;
+        void playTrack(nextIndex, playbackPlaylist);
         return;
       }
 
-      if (audioRef.current.paused) {
-        const playPromise = audioRef.current.play();
-        if (playPromise?.catch) {
-          playPromise.catch(() => undefined);
-        }
-        return;
+      if (pressedKey === "p") {
+        event.preventDefault();
+        const previousIndex =
+          (currentTrackIndex - 1 + playbackQueue.length) % playbackQueue.length;
+        void playTrack(previousIndex, playbackPlaylist);
       }
-
-      audioRef.current.pause();
     };
 
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => {
       window.removeEventListener("keydown", handleGlobalKeyDown);
     };
-  }, [audioRef, currentTrackIndex, hasPlaybackQueue, playbackPlaylist, playTrack]);
+  }, [
+    audioRef,
+    currentTrackIndex,
+    hasPlaybackQueue,
+    hotkeySettings.hotkeysEnabled,
+    hotkeySettings.spacebarPlayPauseEnabled,
+    playbackPlaylist,
+    playbackQueue.length,
+    playTrack,
+  ]);
 
   const togglePlayPause = () => {
     if (!hasPlaybackQueue) {

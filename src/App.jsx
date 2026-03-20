@@ -3,9 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import { PlayerProvider } from "./context/PlayerContext";
 import Player from "./components/Player";
 import Playlist from "./components/Playlist";
+import SettingsPanel from "./components/SettingsPanel";
 import { useAuth } from "./context/useAuth";
 
 const UI_THEME_STORAGE_KEY = "uiTheme";
+const CENTER_VIEW_LIBRARY = "library";
+const CENTER_VIEW_SETTINGS = "settings";
 
 function App() {
   const {
@@ -22,7 +25,7 @@ function App() {
     return storedTheme === "dark";
   });
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [accountMenuStatus, setAccountMenuStatus] = useState("");
+  const [activeCenterView, setActiveCenterView] = useState(CENTER_VIEW_LIBRARY);
   const userMenuRef = useRef(null);
 
   useEffect(() => {
@@ -111,7 +114,6 @@ function App() {
             aria-label="Account menu"
             onClick={() => {
               setIsUserMenuOpen((previous) => !previous);
-              setAccountMenuStatus("");
             }}
             aria-expanded={isUserMenuOpen}
           >
@@ -146,7 +148,10 @@ function App() {
               <button
                 type="button"
                 className="auth-menu-btn"
-                onClick={() => setAccountMenuStatus("Settings section coming soon.")}
+                onClick={() => {
+                  setIsUserMenuOpen(false);
+                  setActiveCenterView(CENTER_VIEW_SETTINGS);
+                }}
               >
                 Settings
               </button>
@@ -168,11 +173,7 @@ function App() {
                 Sign out
               </button>
 
-              {(accountMenuStatus || authError) && (
-                <p className="helper-text auth-menu-status">
-                  {accountMenuStatus || authError}
-                </p>
-              )}
+              {authError && <p className="helper-text auth-menu-status">{authError}</p>}
             </div>
           )}
         </div>
@@ -185,8 +186,21 @@ function App() {
           </p>
         </header>
 
-        <section className="app-grid" aria-label="Music Player Dashboard">
-          <Playlist />
+        <section
+          className={`app-grid ${activeCenterView === CENTER_VIEW_SETTINGS ? "app-grid-settings" : ""}`}
+          aria-label="Music Player Dashboard"
+        >
+          {activeCenterView === CENTER_VIEW_SETTINGS ? (
+            <SettingsPanel
+              user={user}
+              isDarkMode={isDarkMode}
+              onToggleDarkMode={() => setIsDarkMode((previous) => !previous)}
+              onBackToLibrary={() => setActiveCenterView(CENTER_VIEW_LIBRARY)}
+              onSignOut={signOut}
+            />
+          ) : (
+            <Playlist />
+          )}
         </section>
       </main>
       <Player />

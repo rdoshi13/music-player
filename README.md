@@ -12,11 +12,11 @@ To do:
 
 - Add queue.
 - Add settings
-- Increase the track display section height
 - Add equalizer in settings
 - Add crossplay in settings
 - Add more hotkeys in settings
 - Add visualizer
+- Fix mobile UI
 
 Google Auth setup (Firebase):
 
